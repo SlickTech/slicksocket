@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.12)
+cmake_minimum_required(VERSION 2.8.9)
 project(tests)
 
 configure_file(cert.pem ${CMAKE_BINARY_DIR}/bin/cert.pem COPYONLY)
