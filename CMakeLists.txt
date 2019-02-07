@@ -39,7 +39,7 @@ target_include_directories(slicksocket PUBLIC ${CMAKE_BINARY_DIR}/third_party/li
 if (WIN32)
     target_link_libraries(slicksocket websockets_static openssl libssl libcrypto ws2_32)
 else()
-    target_link_libraries(slicksocket libwebsocketa.a openssl ssl crypto)
+    target_link_libraries(slicksocket pthread libwebsockets.a ssl crypto)
 endif()
 
 add_subdirectory(tests EXCLUDE_FROM_ALL)
