@@ -207,9 +207,9 @@ class http_client::http_client_impl final {
 
  public:
   http_client_impl(std::string&& address, int16_t port, std::string&& ca_path)
-    : address_(std::move(address))
+    : port_(port)
+    , address_(std::move(address))
     , ssl_ca_file_path_(std::move(ca_path))
-    , port_(port)
     , queue_(65536) {
 
 #ifndef NDEBUG
