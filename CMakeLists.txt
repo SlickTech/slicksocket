@@ -3,6 +3,7 @@ project(slicksocket)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
+set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 
 if (NOT_CMAKE_BUILD_TYPE)
@@ -12,6 +13,8 @@ endif()
 if (CMAKE_BUILD_TYPE MATCHES Release)
     add_definitions(-DNDEBUG)
 endif()
+
+option(SLICKSOCKET_WITHOUT_TESTS "Don't build tests" OFF)
 
 # Exclude libwebsocket shared lib and test app build
 set(LWS_WITH_SHARED OFF CACHE BOOL "" FORCE)
@@ -42,4 +45,11 @@ else()
     target_link_libraries(slicksocket pthread libwebsockets.a ssl crypto)
 endif()
 
-add_subdirectory(tests EXCLUDE_FROM_ALL)
+if (NOT SLICKSOCKET_WITHOUT_TESTS)
+    add_subdirectory(tests EXCLUDE_FROM_ALL)
+endif()
+
+add_custom_command(TARGET slicksocket POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy
+        "${CMAKE_BINARY_DIR}/third_party/libwebsockets/lib/websockets_static.lib"
+        "${CMAKE_BINARY_DIR}/lib/")
