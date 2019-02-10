@@ -368,7 +368,7 @@ http_response http_client::http_client_impl::request(const char* method, std::sh
   req.method = method;
   slot.publish();
   while (!req.completed.load(std::memory_order_relaxed));
-  return http_response(req.status, std::move(req.response.str()));
+  return http_response(req.status, req.response.str());
 }
 
 inline void http_client::http_client_impl::request(const char *method,
