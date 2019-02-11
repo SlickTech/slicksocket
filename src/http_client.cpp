@@ -59,7 +59,7 @@ int http_callback(struct lws *wsi, enum lws_callback_reasons reason, void* user,
         printf("OnError: %.*s\n", (int)len, (char*)in);
       } else {
         req->response << "Error occurred. ";
-        printf("Error occurred. %s", req->request->path.c_str());
+        printf("Error occurred. %s", req->request->path().c_str());
       }
       req->completed.store(true, std::memory_order_release);
       break;
@@ -74,8 +74,8 @@ int http_callback(struct lws *wsi, enum lws_callback_reasons reason, void* user,
         return -1;
       }
 
-      if (!req->request->headers.empty()) {
-        for (auto &kvp : req->request->headers) {
+      if (!req->request->headers().empty()) {
+        for (auto &kvp : req->request->headers()) {
           if (lws_add_http_header_by_name(wsi,
                                           (unsigned char *) kvp.first.c_str(),
                                           (unsigned char *) kvp.second.c_str(),
@@ -91,23 +91,25 @@ int http_callback(struct lws *wsi, enum lws_callback_reasons reason, void* user,
         }
       }
 
-	  if (!req->request->content_type.empty()) {
+      const auto& content_type = req->request->content_type();
+	  if (!content_type.empty()) {
         if (lws_add_http_header_by_token(wsi,
                                          WSI_TOKEN_HTTP_CONTENT_TYPE,
-                                         (unsigned char *) req->request->content_type.c_str(),
-                                         (int) req->request->content_type.size(),
+                                         (unsigned char *) content_type.c_str(),
+                                         (int) content_type.size(),
                                          p,
                                          end)) {
           req->status = 502;
           req->wsi = nullptr;
-          req->response << "Failed to add header Content-Type:" << req->request->content_type;
+          req->response << "Failed to add header Content-Type:" << content_type;
           req->completed.store(true, std::memory_order_release);
           return -1;
         }
 	  }
 
-	  if (!req->request->body.empty()) {
-	    std::string sz = std::to_string(req->request->body.size());
+	  const auto& body = req->request->body();
+	  if (!body.empty()) {
+	    std::string sz = std::to_string(body.size());
         if (lws_add_http_header_by_token(wsi,
                                          WSI_TOKEN_HTTP_CONTENT_LENGTH,
                                          (unsigned char *) sz.c_str(),
@@ -128,7 +130,7 @@ int http_callback(struct lws *wsi, enum lws_callback_reasons reason, void* user,
 
     case LWS_CALLBACK_CLIENT_WRITEABLE: {
       auto p = (unsigned char*)&req->buffer[LWS_PRE];
-      auto& body = req->request->body;
+      const auto& body = req->request->body();
       auto sz = body.size() + 1;
 
       if (sz > sizeof(req->buffer) - LWS_PRE) {
@@ -195,19 +197,21 @@ namespace slick {
 namespace net {
 
 class http_client::http_client_impl final {
-  lws_context *context_ = nullptr;
-  lws_client_connect_info cci_;
   uint64_t cursor_ = 0;
+  lws_context *context_ = nullptr;
+  int32_t cpu_affinity_ = -1;
   int16_t port_ = 0;
+  std::atomic_bool run_ {true};
+  lws_client_connect_info cci_;
   std::string address_;
   std::string ssl_ca_file_path_;
   std::thread thread_;
   ring_buffer<request_info> queue_;
-  std::atomic_bool run_ {true};
 
  public:
-  http_client_impl(std::string&& address, int16_t port, std::string&& ca_path)
-    : port_(port)
+  http_client_impl(std::string&& address, int16_t port, std::string&& ca_path, int32_t cpu_affinity = -1)
+    : cpu_affinity_(cpu_affinity)
+    , port_(port)
     , address_(std::move(address))
     , ssl_ca_file_path_(std::move(ca_path))
     , queue_(65536) {
@@ -279,16 +283,28 @@ class http_client::http_client_impl final {
 } //namespace net
 } //namespace slick
 
-http_client::http_client(std::string address, int16_t port, std::string ca_file_path) {
+http_client::http_client(std::string address, int16_t port, std::string ca_file_path, int32_t cpu_affinity) {
   if (address.find("https://") == 0) {
     port = port != -1 ? port : 443;
-    impl_ = std::make_unique<http_client_impl>(address.substr(8), port, std::move(ca_file_path));
+    impl_ = std::make_unique<http_client_impl>(address.substr(8), port, std::move(ca_file_path), cpu_affinity);
   } else if (address.find("http://") == 0) {
     port = port != -1 ? port : 80;
-    impl_ = std::make_unique<http_client_impl>(address.substr(7), port, std::move(ca_file_path));
+    impl_ = std::make_unique<http_client_impl>(address.substr(7), port, std::move(ca_file_path), cpu_affinity);
   } else {
-    impl_ = std::make_unique<http_client_impl>(address.substr(7), port, std::move(ca_file_path));
+    impl_ = std::make_unique<http_client_impl>(address.substr(7), port, std::move(ca_file_path), cpu_affinity);
   }
+}
+
+http_client::http_client(std::string address)
+  : http_client(std::move(address), -1, "", -1) {
+}
+
+http_client::http_client(std::string address, int32_t cpu_affinity)
+  : http_client(std::move(address), -1, "", cpu_affinity) {
+
+}
+http_client::http_client(std::string address, std::string ca_file_path, int32_t cpu_affinity)
+  : http_client(std::move(address), -1, std::move(ca_file_path), cpu_affinity) {
 }
 
 http_client::~http_client() {}
@@ -329,13 +345,25 @@ void http_client::get(std::shared_ptr<http_request> request, AsyncCallback&& cal
 inline void http_client::http_client_impl::run() {
   std::unordered_set<request_info*> requests;
 
+  if (cpu_affinity_ != -1) {
+#ifdef WIN32
+    auto thrd = GetCurrentThread();
+    SetThreadAffinityMask(thrd, 1LL << (cpu_affinity_ % std::thread::hardware_concurrency()));
+#else
+    cpu_set_t cpus;
+    CPU_ZERO(&cpus);
+    CPU_SET((cpu_affinity_ % std::thread::hardware_concurrency()), &cpus);
+    pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpus);
+#endif
+  }
+
   while (run_.load(std::memory_order_relaxed)) {
     auto sn = queue_.available();
     if (cursor_ != sn) {
       auto& req = queue_[cursor_++];
       lws_client_connect_info cci;
       memcpy(&cci, &cci_, sizeof(cci));
-      cci.path = req.request->path.c_str();
+      cci.path = req.request->path().c_str();
       cci.pwsi = &req.wsi;
       cci.method = req.method;
       cci.userdata = &req;

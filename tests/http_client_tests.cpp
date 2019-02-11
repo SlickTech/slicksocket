@@ -32,7 +32,7 @@ using namespace slick::net;
 namespace {
 
 TEST_CASE("HTTP GET") {
-  http_client client("https://api.pro.coinbase.com", 443, "cert.pem");
+  http_client client("https://api.pro.coinbase.com", "cert.pem");
   auto response = client.get("/products");
   std::cout << response.response_text << std::endl;
   REQUIRE((response.status == 200 && !response.response_text.empty()));

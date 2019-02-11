@@ -35,24 +35,36 @@ namespace slick {
 namespace net {
 
 struct http_request {
-  std::string path;
-  std::string body;
-  std::string content_type;
+ private:
+  std::string path_;
+  std::string body_;
+  std::string content_type_;
 
   /**
-   * NOTE: Header name must end with ":"
-   */
-  std::unordered_map<std::string, std::string> headers;
+    * NOTE: Header name must end with ":"
+    */
+  std::unordered_map<std::string, std::string> headers_;
 
+ public:
   http_request() = default;
-  http_request(std::string&& p) : path(std::move(p)) {}
+  explicit http_request(std::string &&p) : path_(std::move(p)) {}
 
-  void add_header(std::string key, std::string value) {
+  void add_header(std::string key, std::string value) noexcept {
     if (key.back() != ':') {
       key.append(":");
     }
-    headers.emplace(std::move(key), std::move(value));
+    headers_.emplace(std::move(key), std::move(value));
   }
+
+  void add_body(std::string body, std::string content_type) noexcept {
+    body_ = std::move(body);
+    content_type_ = std::move(content_type);
+  }
+
+  const std::string& path() const noexcept { return path_; }
+  const std::unordered_map<std::string, std::string>& headers() const noexcept { return headers_; }
+  const std::string& body() const noexcept { return body_; }
+  const std::string& content_type() const noexcept { return content_type_; }
 };
 
 struct http_response {
@@ -66,7 +78,10 @@ class http_client {
  public:
   using AsyncCallback = std::function<void(http_response)>;
 
-  http_client(std::string address, int16_t port = - 1, std::string ca_file_path = "");
+  explicit http_client(std::string address);
+  http_client(std::string address, int32_t cpu_affinity);
+  http_client(std::string address, std::string ca_file_path, int32_t cpu_affinity = -1);
+  http_client(std::string address, int16_t port, std::string ca_file_path, int32_t cpu_affinity = -1);
   virtual ~http_client();
 
   // Sync requests
