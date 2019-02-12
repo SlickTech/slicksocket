@@ -40,6 +40,7 @@ struct request_info {
   std::shared_ptr<http_request> request;
   std::function<void(http_response)> callback = nullptr;
   std::stringstream response;
+  char content_type[1024];
   lws *wsi;
   char buffer[2048 + LWS_PRE];
   char *px = buffer + LWS_PRE;
@@ -52,7 +53,6 @@ int http_callback(struct lws *wsi, enum lws_callback_reasons reason, void* user,
 
   switch (reason) {
     case LWS_CALLBACK_CLIENT_CONNECTION_ERROR:
-      req->status = 502;
       req->wsi = nullptr;
       if (in && len) {
         req->response << "Error occurred. " << std::string((char*)in, len);
@@ -67,7 +67,6 @@ int http_callback(struct lws *wsi, enum lws_callback_reasons reason, void* user,
     case LWS_CALLBACK_CLIENT_APPEND_HANDSHAKE_HEADER: {
       unsigned char **p = (unsigned char **) in, *end = (*p) + len;
       if (lws_add_http_header_by_token(wsi, WSI_TOKEN_HTTP_USER_AGENT, (unsigned char*)"libwebsocket", 12, p, end)) {
-        req->status = 502;
         req->wsi = nullptr;
         req->response << "Failed to add User-Agent header";
         req->completed.store(true, std::memory_order_release);
@@ -99,7 +98,6 @@ int http_callback(struct lws *wsi, enum lws_callback_reasons reason, void* user,
                                          (int) content_type.size(),
                                          p,
                                          end)) {
-          req->status = 502;
           req->wsi = nullptr;
           req->response << "Failed to add header Content-Type:" << content_type;
           req->completed.store(true, std::memory_order_release);
@@ -116,7 +114,6 @@ int http_callback(struct lws *wsi, enum lws_callback_reasons reason, void* user,
                                          (int) sz.size(),
                                          p,
                                          end)) {
-          req->status = 502;
           req->wsi = nullptr;
           req->response << "Failed to add header Content-Length:" << sz;
           req->completed.store(true, std::memory_order_release);
@@ -134,7 +131,6 @@ int http_callback(struct lws *wsi, enum lws_callback_reasons reason, void* user,
       auto sz = body.size() + 1;
 
       if (sz > sizeof(req->buffer) - LWS_PRE) {
-        req->status = 502;
         req->wsi = nullptr;
         req->response << "body exceeds buffer size";
         req->completed.store(true, std::memory_order_release);
@@ -145,7 +141,6 @@ int http_callback(struct lws *wsi, enum lws_callback_reasons reason, void* user,
       lws_client_http_body_pending(wsi, 0);
 
       if (lws_write(wsi, p, n, LWS_WRITE_HTTP_FINAL) != n) {
-        req->status = 502;
         req->wsi = nullptr;
         req->response << "Failed to write body";
         req->completed.store(true, std::memory_order_release);
@@ -153,9 +148,12 @@ int http_callback(struct lws *wsi, enum lws_callback_reasons reason, void* user,
       break;
     }
 
-    case LWS_CALLBACK_ESTABLISHED_CLIENT_HTTP:
+    case LWS_CALLBACK_ESTABLISHED_CLIENT_HTTP: {
       req->status = lws_http_client_http_response(wsi);
+      assert(sizeof(req->content_type) > lws_hdr_total_length(wsi, WSI_TOKEN_HTTP_CONTENT_TYPE));
+      lws_hdr_copy(wsi, req->content_type, sizeof(req->content_type), WSI_TOKEN_HTTP_CONTENT_TYPE);
       break;
+    }
 
     case LWS_CALLBACK_RECEIVE_CLIENT_HTTP: {
       if (lws_http_client_read(wsi, &req->px, &req->buffer_len) < 0) {
@@ -396,7 +394,7 @@ http_response http_client::http_client_impl::request(const char* method, std::sh
   req.method = method;
   slot.publish();
   while (!req.completed.load(std::memory_order_relaxed));
-  return http_response(req.status, req.response.str());
+  return http_response(req.status, "", req.response.str());
 }
 
 inline void http_client::http_client_impl::request(const char *method,

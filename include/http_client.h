@@ -69,9 +69,11 @@ struct http_request {
 
 struct http_response {
   int32_t status = 0;
+  std::string content_type;
   std::string response_text;
 
-  http_response(int32_t stat, std::string&& response) : status(stat), response_text(std::move(response)) {}
+  http_response(int32_t stat, std::string &&type, std::string &&response)
+      : status(stat), content_type(std::move(type)), response_text(std::move(response)) {}
 };
 
 class http_client {
