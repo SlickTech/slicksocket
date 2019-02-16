@@ -40,7 +40,7 @@ struct request_info {
   std::shared_ptr<http_request> request;
   std::function<void(http_response)> callback = nullptr;
   std::stringstream response;
-  char content_type[1024];
+  char content_type[512];
   lws *wsi;
   char buffer[2048 + LWS_PRE];
   char *px = buffer + LWS_PRE;
@@ -53,22 +53,19 @@ int http_callback(struct lws *wsi, enum lws_callback_reasons reason, void* user,
 
   switch (reason) {
     case LWS_CALLBACK_CLIENT_CONNECTION_ERROR:
-      req->wsi = nullptr;
+      req->response << req->request->path() << " error occurred. ";
       if (in && len) {
-        req->response << "Error occurred. " << std::string((char*)in, len);
-        printf("OnError: %.*s\n", (int)len, (char*)in);
-      } else {
-        req->response << "Error occurred. ";
-        printf("Error occurred. %s", req->request->path().c_str());
+         req->response << std::string((char*)in, len);
       }
+      req->wsi = nullptr;
       req->completed.store(true, std::memory_order_release);
       break;
 
     case LWS_CALLBACK_CLIENT_APPEND_HANDSHAKE_HEADER: {
-      unsigned char **p = (unsigned char **) in, *end = (*p) + len;
+      unsigned char **p = (unsigned char **) in, *end = (*p) + len - 1;
       if (lws_add_http_header_by_token(wsi, WSI_TOKEN_HTTP_USER_AGENT, (unsigned char*)"libwebsocket", 12, p, end)) {
         req->wsi = nullptr;
-        req->response << "Failed to add User-Agent header";
+        req->response << req->request->path() << " failed to add User-Agent header";
         req->completed.store(true, std::memory_order_release);
         return -1;
       }
@@ -81,9 +78,8 @@ int http_callback(struct lws *wsi, enum lws_callback_reasons reason, void* user,
                                           (int) kvp.second.size(),
                                           p,
                                           end)) {
-            req->status = 502;
             req->wsi = nullptr;
-            req->response << "Failed to add header " << kvp.first << kvp.second;
+            req->response << req->request->path() << " failed to add header " << kvp.first << ": " << kvp.second;
             req->completed.store(true, std::memory_order_release);
             return -1;
           }
@@ -99,7 +95,7 @@ int http_callback(struct lws *wsi, enum lws_callback_reasons reason, void* user,
                                          p,
                                          end)) {
           req->wsi = nullptr;
-          req->response << "Failed to add header Content-Type:" << content_type;
+          req->response << req->request->path() << " failed to add header Content-Type:" << content_type;
           req->completed.store(true, std::memory_order_release);
           return -1;
         }
@@ -115,7 +111,7 @@ int http_callback(struct lws *wsi, enum lws_callback_reasons reason, void* user,
                                          p,
                                          end)) {
           req->wsi = nullptr;
-          req->response << "Failed to add header Content-Length:" << sz;
+          req->response << req->request->path() << " failed to add header Content-Length:" << sz;
           req->completed.store(true, std::memory_order_release);
           return -1;
         }
@@ -125,14 +121,14 @@ int http_callback(struct lws *wsi, enum lws_callback_reasons reason, void* user,
       break;
     }
 
-    case LWS_CALLBACK_CLIENT_WRITEABLE: {
+    case LWS_CALLBACK_CLIENT_HTTP_WRITEABLE: {
       auto p = (unsigned char*)&req->buffer[LWS_PRE];
       const auto& body = req->request->body();
       auto sz = body.size() + 1;
 
       if (sz > sizeof(req->buffer) - LWS_PRE) {
         req->wsi = nullptr;
-        req->response << "body exceeds buffer size";
+        req->response << req->request->path() << " body exceeds buffer size";
         req->completed.store(true, std::memory_order_release);
         return -1;
       }
@@ -142,8 +138,9 @@ int http_callback(struct lws *wsi, enum lws_callback_reasons reason, void* user,
 
       if (lws_write(wsi, p, n, LWS_WRITE_HTTP_FINAL) != n) {
         req->wsi = nullptr;
-        req->response << "Failed to write body";
+        req->response << req->request->path() << " failed to write body";
         req->completed.store(true, std::memory_order_release);
+        return -1;
       }
       break;
     }
@@ -152,11 +149,15 @@ int http_callback(struct lws *wsi, enum lws_callback_reasons reason, void* user,
       req->status = lws_http_client_http_response(wsi);
       assert(sizeof(req->content_type) > lws_hdr_total_length(wsi, WSI_TOKEN_HTTP_CONTENT_TYPE));
       lws_hdr_copy(wsi, req->content_type, sizeof(req->content_type), WSI_TOKEN_HTTP_CONTENT_TYPE);
+      req->response.clear();
       break;
     }
 
     case LWS_CALLBACK_RECEIVE_CLIENT_HTTP: {
-      if (lws_http_client_read(wsi, &req->px, &req->buffer_len) < 0) {
+      char *px = req->buffer + LWS_PRE;
+      auto buffer_len = req->buffer_len;
+      if (lws_http_client_read(wsi, &px, &buffer_len) < 0) {
+        req->completed.store(true, std::memory_order_relaxed);
         return -1;
       }
       return 0;
@@ -167,6 +168,7 @@ int http_callback(struct lws *wsi, enum lws_callback_reasons reason, void* user,
       return 0;
 
     case LWS_CALLBACK_COMPLETED_CLIENT_HTTP:
+    case LWS_CALLBACK_CLOSED_CLIENT_HTTP:
       req->wsi = nullptr;
       req->completed.store(true, std::memory_order_release);
       lws_cancel_service(lws_get_context(wsi));
@@ -174,6 +176,7 @@ int http_callback(struct lws *wsi, enum lws_callback_reasons reason, void* user,
 
     case LWS_CALLBACK_WSI_DESTROY:
       req->wsi = nullptr;
+      req->completed.store(true, std::memory_order_release);
       break;
 
     default:
@@ -257,14 +260,14 @@ class http_client::http_client_impl final {
   ~http_client_impl() {
     run_.store(false, std::memory_order_relaxed);
 
-    if (thread_.joinable()) {
-      thread_.join();
-    }
-
     if (context_) {
       lws_cancel_service(context_);
       lws_context_destroy(context_);
       context_ = nullptr;
+    }
+
+    if (thread_.joinable()) {
+      thread_.join();
     }
   }
 
@@ -359,14 +362,14 @@ inline void http_client::http_client_impl::run() {
     auto sn = queue_.available();
     if (cursor_ != sn) {
       auto& req = queue_[cursor_++];
+      requests.emplace(&req);
+
       lws_client_connect_info cci;
       memcpy(&cci, &cci_, sizeof(cci));
       cci.path = req.request->path().c_str();
       cci.pwsi = &req.wsi;
       cci.method = req.method;
       cci.userdata = &req;
-
-      requests.emplace(&req);
 
       lws_client_connect_via_info(&cci);
     }
@@ -378,6 +381,9 @@ inline void http_client::http_client_impl::run() {
     for (auto it = requests.begin(); it != requests.end();) {
       auto req = *it;
       if (req->completed.load(std::memory_order_relaxed)) {
+        if (req->callback) {
+          req->callback(http_response(req->status, req->content_type, req->response.str()));
+        }
         it = requests.erase(it);
       } else {
         ++it;
