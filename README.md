@@ -101,7 +101,7 @@ endif()
 
 ### Http Client
 Using http_client in your code:<br />
-* Put request:
+* GET request:
 ```c++
 // sampel.cpp
 #include <http_cliet.h>
@@ -136,4 +136,25 @@ int main(int argc, char* argv[]) {
     while (!completed.load(std::memory_order_relaxed));
     return 0;
 }
+```
+* POST request:
+```
+http_client client("https://postman-echo.com");
+auto request = std::make_shared<http_request>("/post");
+request->add_header("Authorization", "test");
+request->add_body("{\"name\":\"Tom\"}", "application/json");
+auto response = client.post(std::move(request));
+std::cout << response.status << " " << response.response_text << std::endl;
+```
+* DELETE request:
+```
+// delete depends on serever implementation
+http_client client("https://postman-echo.com");
+// delete through request url
+auto request = std::make_shared<http_request>("/12345");
+auto response = client.del(std::move(request));
+// delete through request body
+auto request = std::make_shared<http_request>("/");
+request->add_body("{\"id\": 12345}", "application/json");
+auto response = client.del(std::move(request));
 ```
