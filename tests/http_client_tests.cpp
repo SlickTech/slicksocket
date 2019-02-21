@@ -26,6 +26,7 @@
 
 #include "catch.hpp"
 #include "http_client.h"
+#include <condition_variable>
 
 using namespace slick::net;
 
@@ -34,8 +35,43 @@ namespace {
 TEST_CASE("HTTP GET") {
   http_client client("https://api.pro.coinbase.com", "cert.pem");
   auto response = client.get("/products");
-  std::cout << response.response_text << std::endl;
-  REQUIRE((response.status == 200 && !response.response_text.empty()));
+//  std::cout << response.response_text << std::endl;
+  REQUIRE((response.status == 200 && !response.response_text.empty()
+      && response.response_text.find("BTC-USD") != std::string::npos
+      && response.response_text.find("quote_currency") != std::string::npos));
+
+  std::condition_variable cond;
+  std::mutex mutex;
+  std::unique_lock<std::mutex> lock(mutex);
+  client.get("/products", [&cond](http_response response) {
+    REQUIRE((response.status == 200 && !response.response_text.empty()
+        && response.response_text.find("BTC-USD") != std::string::npos
+        && response.response_text.find("quote_currency") != std::string::npos));
+    cond.notify_one();
+  });
+
+  cond.wait(lock);
+}
+
+TEST_CASE("HTTP POST") {
+  http_client client("https://postman-echo.com", "cert.pem");
+  auto request = std::make_shared<http_request>("/post");
+  request->add_header("Authorization", "test");
+  request->add_body("{\"name\":\"Tom\"}", "application/json");
+  auto response = client.post(std::move(request));
+//  printf("%d %s\n", response.status, response.response_text.c_str());
+  REQUIRE((response.status == 200 && response.response_text.find("\"authorization\":\"test\"") != std::string::npos
+      && response.response_text.find("\"json\":{\"name\":\"Tom\"}") != std::string::npos));
+}
+
+TEST_CASE("HTTP PUT") {
+  http_client client("https://postman-echo.com", "cert.pem");
+  auto request = std::make_shared<http_request>("/put");
+  request->add_header("Authorization", "test");
+  request->add_body("{\"id\":12345}", "application/json");
+  auto response = client.put(std::move(request));
+  REQUIRE((response.status == 200 && response.response_text.find("\"authorization\":\"test\"") != std::string::npos
+      && response.response_text.find("\"json\":{\"id\":12345}") != std::string::npos));
 }
 
 }
