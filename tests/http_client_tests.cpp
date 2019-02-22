@@ -34,8 +34,8 @@ namespace {
 
 TEST_CASE("HTTP GET") {
   http_client client("https://api.pro.coinbase.com", "cert.pem");
-  auto response = client.get("/products");
-//  std::cout << response.response_text << std::endl;
+  auto response = client.request("GET", "/products");
+  std::cout << response.response_text << std::endl;
   REQUIRE((response.status == 200 && !response.response_text.empty()
       && response.response_text.find("BTC-USD") != std::string::npos
       && response.response_text.find("quote_currency") != std::string::npos));
@@ -43,10 +43,11 @@ TEST_CASE("HTTP GET") {
   std::condition_variable cond;
   std::mutex mutex;
   std::unique_lock<std::mutex> lock(mutex);
-  client.get("/products", [&cond](http_response response) {
-    REQUIRE((response.status == 200 && !response.response_text.empty()
-        && response.response_text.find("BTC-USD") != std::string::npos
-        && response.response_text.find("quote_currency") != std::string::npos));
+  client.request("GET", "/products", [&cond](http_response rsp) {
+    std::cout << rsp.status << " " << rsp.response_text << std::endl;
+    REQUIRE((rsp.status == 200 && !rsp.response_text.empty()
+        && rsp.response_text.find("BTC-USD") != std::string::npos
+        && rsp.response_text.find("quote_currency") != std::string::npos));
     cond.notify_one();
   });
 
@@ -58,8 +59,8 @@ TEST_CASE("HTTP POST") {
   auto request = std::make_shared<http_request>("/post");
   request->add_header("Authorization", "test");
   request->add_body("{\"name\":\"Tom\"}", "application/json");
-  auto response = client.post(std::move(request));
-//  printf("%d %s\n", response.status, response.response_text.c_str());
+  auto response = client.request("POST", std::move(request));
+  printf("%d %s\n", response.status, response.response_text.c_str());
   REQUIRE((response.status == 200 && response.response_text.find("\"authorization\":\"test\"") != std::string::npos
       && response.response_text.find("\"json\":{\"name\":\"Tom\"}") != std::string::npos));
 }
@@ -69,7 +70,7 @@ TEST_CASE("HTTP PUT") {
   auto request = std::make_shared<http_request>("/put");
   request->add_header("Authorization", "test");
   request->add_body("{\"id\":12345}", "application/json");
-  auto response = client.put(std::move(request));
+  auto response = client.request("PUT", std::move(request));
   REQUIRE((response.status == 200 && response.response_text.find("\"authorization\":\"test\"") != std::string::npos
       && response.response_text.find("\"json\":{\"id\":12345}") != std::string::npos));
 }

@@ -1,7 +1,7 @@
 /***
  *  MIT License
  *
- *  Copyright (c) 2019 SlickTech <support@slicktech.org>
+ *  Copyright (c) 2018-2019 SlickTech <support@slicktech.org>
  *
  *  Permission is hereby granted, free of charge, to any person obtaining a copy
  *  of this software and associated documentation files (the "Software"), to deal
@@ -260,14 +260,13 @@ class http_client::http_client_impl final {
   ~http_client_impl() {
     run_.store(false, std::memory_order_relaxed);
 
-    if (context_) {
-      lws_cancel_service(context_);
-      lws_context_destroy(context_);
-      context_ = nullptr;
-    }
-
     if (thread_.joinable()) {
       thread_.join();
+    }
+
+    if (context_) {
+      lws_context_destroy(context_);
+      context_ = nullptr;
     }
   }
 
@@ -310,35 +309,19 @@ http_client::http_client(std::string address, std::string ca_file_path, int32_t 
 
 http_client::~http_client() {}
 
-http_response http_client::get(std::string path) {
-  return impl_->request("GET", std::make_shared<http_request>(std::move(path)));
+http_response http_client::request(const char* method, std::string path) {
+  return impl_->request(method, std::make_shared<http_request>(std::move(path)));
 }
 
-http_response http_client::get(std::shared_ptr<http_request> request) {
-  return impl_->request("GET", std::move(request));
+http_response http_client::request(const char* method, std::shared_ptr<http_request> request) {
+  return impl_->request(method, std::move(request));
 }
 
-http_response http_client::post(std::shared_ptr<http_request> request) {
-  return impl_->request("POST", std::move(request));
+void http_client::request(const char* method, std::string path, AsyncCallback&& callback) {
+  impl_->request(method, std::make_shared<http_request>(std::move(path)), std::move(callback));
 }
-
-http_response http_client::put(std::shared_ptr<http_request> request) {
-  return impl_->request("PUT", std::move(request));
-}
-
-http_response http_client::del(std::string path) {
-  return impl_->request("DELETE", std::make_shared<http_request>(std::move(path)));
-}
-
-http_response http_client::del(std::shared_ptr<http_request> request) {
-  return impl_->request("DELETE", std::move(request));
-}
-
-void http_client::get(std::string path, AsyncCallback&& callback) {
-  impl_->request("GET", std::make_shared<http_request>(std::move(path)), std::move(callback));
-}
-void http_client::get(std::shared_ptr<http_request> request, AsyncCallback&& callback) {
-	impl_->request("GET", std::move(request), std::move(callback));
+void http_client::request(const char* method, std::shared_ptr<http_request> request, AsyncCallback&& callback) {
+	impl_->request(method, std::move(request), std::move(callback));
 }
 
 //******************** http_client_impl implementation ********************

@@ -101,7 +101,6 @@ endif()
 
 ### Http Client
 Using http_client in your code:<br />
-* GET request:
 ```c++
 // sampel.cpp
 #include <http_cliet.h>
@@ -112,8 +111,10 @@ using namespace slick::net;
 int main(int argc, char* argv[]) {
     http_client client("https://api.pro.coinbase.com");
     
+    // GET request
+    
     // Synchronous request
-    auto rsp = client->get("/products");
+    auto rsp = client->request("GET", /products");
     if (rsp.status != 200) {
         std::cerr << "Failed to get products";
         return 1;
@@ -123,38 +124,38 @@ int main(int argc, char* argv[]) {
     
     // Asynchronous request
     std::atomic_bool completed {false};
-    client->get("/products", [](http_respose rsp) {
-        auto rsp = client->get("/products");
+    client->request("GET", "/products", [](http_respose rsp) {
         if (rsp.status != 200) {
             std::cerr << "Failed to get products";
             return;
         }
-        
         std::cout << rsp.respnse_text << std:endl;
         completed.store(true, std::memory_order_release);
     });
+    
+    // POST request
+    http_client client2("https://postman-echo.com");
+    auto request = std::make_shared<http_request>("/post");
+    request->add_header("Authorization", "testxxxxxxxxxxxxxxxxxxxx");
+    request->add_body("{\"name\":\"Tom\"}", "application/json");
+    response = client2.request("POST", std::move(request));
+    std::cout << "POST response: "
+              << response.status << " " << response.response_text << std::endl;
+              
+    // DELETE request - delete depends on serever implementation
+    
+    // delete through request url
+    request = std::make_shared<http_request>("/12345");
+    response = client2.request("DELETE", std::move(request));
+    std::cout << response.response_text << std::endl;
+    
+    // delete through request body
+    request = std::make_shared<http_request>("/");
+    request->add_body("{\"id\": 12345}", "application/json");
+    response = client2.request("DELETE", std::move(request));
+    std::cout << response.response_text << std::endl;
+    
     while (!completed.load(std::memory_order_relaxed));
     return 0;
 }
-```
-* POST request:
-```
-http_client client("https://postman-echo.com");
-auto request = std::make_shared<http_request>("/post");
-request->add_header("Authorization", "test");
-request->add_body("{\"name\":\"Tom\"}", "application/json");
-auto response = client.post(std::move(request));
-std::cout << response.status << " " << response.response_text << std::endl;
-```
-* DELETE request:
-```
-// delete depends on serever implementation
-http_client client("https://postman-echo.com");
-// delete through request url
-auto request = std::make_shared<http_request>("/12345");
-auto response = client.del(std::move(request));
-// delete through request body
-auto request = std::make_shared<http_request>("/");
-request->add_body("{\"id\": 12345}", "application/json");
-auto response = client.del(std::move(request));
 ```
