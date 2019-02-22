@@ -159,3 +159,7 @@ int main(int argc, char* argv[]) {
     return 0;
 }
 ```
+
+## Caveats
+* Does not support HTTP/WebSocket server at moment
+* Need multipart form-data support.
