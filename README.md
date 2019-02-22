@@ -65,7 +65,7 @@ git submodule update --init
 mkdir build
 cd build
 cmake ..
-make slicksocket
+cmake --build . --target slicksocket
 ```
 **NOTE:** By default, it makes a release build. To make debug build, use: <br />
 ``cmake .. -DCMAKE_BUILD_TYPE=Debug``<br />
@@ -77,9 +77,9 @@ cmake .. -DOPENSSL_ROOT_DIR=<OpenSSL_install_path> \
     -DCMAKE_INCLUDE_DIRECTORIES_PROJECT_BEFORE=<OpenSSL_install_path>
 ```
 
-**NOTE:** By default, above command makes a static library on Windows, but a shared library on linux/Mac.
- To make a static library on Linux/Mac, run:<br />``make slicksocket_static`` <br />
- Currently not support shared library build on Windows.
+**NOTE:** By default, above command makes a shared library. To make a static library, run:<br />
+``cmake --build . --target slicksocket_static`` <br />
+``cmake --build .`` will create both shared and static library.
 
 
 ## Tutorial

@@ -38,15 +38,26 @@ set(SOURCES
         src/http_client.cpp)
 
 if (WIN32)
-    add_library(slicksocket ${SOURCES})
+    set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS ON)
+    include(GenerateExportHeader)
+
+    add_library(slicksocket_static ${SOURCES})
+    target_compile_definitions(slicksocket_static PUBLIC -Dslicksocket_STATIC)
+    set_target_properties(slicksocket_static PROPERTIES LINKER_LANGUAGE CXX)
+    set_target_properties(slicksocket_static PROPERTIES OUTPUT_NAME "slicksocket")
+    add_dependencies(slicksocket_static websockets)
+
+    add_library(slicksocket SHARED ${SOURCES})
+    generate_export_header(slicksocket)
     set_target_properties(slicksocket PROPERTIES LINKER_LANGUAGE CXX)
 
-    add_dependencies(slicksocket websockets)
+    add_dependencies(slicksocket websockets_shared)
+    target_link_libraries(slicksocket websockets_shared)
 
     add_custom_command(TARGET slicksocket POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy
-            "${CMAKE_BINARY_DIR}/third_party/libwebsockets/lib/websockets_static.lib"
-            "${CMAKE_BINARY_DIR}/lib/")
+            "${CMAKE_BINARY_DIR}/third_party/libwebsockets/bin/websockets.dll"
+            "${CMAKE_BINARY_DIR}/bin/")
 
 #    add_custom_command(TARGET slicksocket POST_BUILD
 #            COMMAND ${CMAKE_COMMAND} -E copy
@@ -55,6 +66,7 @@ if (WIN32)
 elseif(APPLE)
     add_library(slicksocket_static ${SOURCES})
     set_target_properties(slicksocket_static PROPERTIES LINKER_LANGUAGE CXX)
+    set_target_properties(slicksocket_static PROPERTIES OUTPUT_NAME "slicksocket")
     add_dependencies(slicksocket_static websockets)
 
     add_library(slicksocket SHARED ${SOURCES})
@@ -83,6 +95,7 @@ elseif(APPLE)
 else()
     add_library(slicksocket_static ${SOURCES})
     set_target_properties(slicksocket_static PROPERTIES LINKER_LANGUAGE CXX)
+    set_target_properties(slicksocket_static PROPERTIES OUTPUT_NAME "slicksocket")
 
     add_library(slicksocket SHARED ${SOURCES})
     set_target_properties(slicksocket PROPERTIES LINKER_LANGUAGE CXX)
