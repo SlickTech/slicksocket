@@ -224,6 +224,8 @@ int ws_callback(struct lws *wsi, enum lws_callback_reasons reason, void *user, v
       } else if (client->receiving_buffer) {
         // message completed
         client->callback->on_data(client->receiving_buffer, client->data_sz);
+        delete [] client->receiving_buffer;
+        client->receiving_buffer = nullptr;
       } else {
         // the package contains a whole message
         client->callback->on_data((const char*)in, len);
