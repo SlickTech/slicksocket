@@ -34,8 +34,10 @@ include_directories(third_party/libwebsockets/include)
 link_directories("${OPENSSL_INCLUDE_DIR}/../lib")
 
 set(SOURCES
-        include/http_client.h
-        src/http_client.cpp)
+        include/slicksocket/http_client.h
+        include/slicksocket/websocket_client.h
+        src/http_client.cpp
+        src/websocket_client.cpp)
 
 if (WIN32)
     set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS ON)

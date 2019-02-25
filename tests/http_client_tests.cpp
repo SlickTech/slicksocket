@@ -25,7 +25,7 @@
 #define CATCH_CONFIG_MAIN
 
 #include "catch.hpp"
-#include "http_client.h"
+#include "slicksocket/http_client.h"
 #include <condition_variable>
 
 using namespace slick::net;

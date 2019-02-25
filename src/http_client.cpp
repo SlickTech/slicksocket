@@ -22,7 +22,7 @@
  *  SOFTWARE.
  */
 
-#include "http_client.h"
+#include "slicksocket/http_client.h"
 #include "ring_buffer.h"
 #include <libwebsockets.h>
 #include <atomic>
@@ -48,7 +48,7 @@ struct request_info {
   std::atomic_bool completed {false};
 };
 
-int http_callback(struct lws *wsi, enum lws_callback_reasons reason, void* user, void* in, size_t len) {
+inline int http_callback(struct lws *wsi, enum lws_callback_reasons reason, void* user, void* in, size_t len) {
   auto req = (request_info*)lws_wsi_user(wsi);
 
   switch (reason) {
@@ -284,10 +284,10 @@ class http_client::http_client_impl final {
 } //namespace slick
 
 http_client::http_client(std::string address, int16_t port, std::string ca_file_path, int32_t cpu_affinity) {
-  if (address.find("https://") == 0) {
+  if (address.find("https:////") == 0) {
     port = port != -1 ? port : 443;
     impl_ = std::make_unique<http_client_impl>(address.substr(8), port, std::move(ca_file_path), cpu_affinity);
-  } else if (address.find("http://") == 0) {
+  } else if (address.find("http:////") == 0) {
     port = port != -1 ? port : 80;
     impl_ = std::make_unique<http_client_impl>(address.substr(7), port, std::move(ca_file_path), cpu_affinity);
   } else {
@@ -341,8 +341,9 @@ inline void http_client::http_client_impl::run() {
 #endif
   }
 
+  uint64_t sn = 0;
   while (run_.load(std::memory_order_relaxed)) {
-    auto sn = queue_.available();
+    sn = queue_.available();
     if (cursor_ != sn) {
       auto& req = queue_[cursor_++];
       requests.emplace(&req);

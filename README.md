@@ -88,7 +88,7 @@ Set up project from CMake:
 cmake_minimum_required(VERSION 3.7)
 project(sample)
 
-include_directory(<slicksocket_include_path>)
+include_directory(<slicksocket_include_path>/include)
 add_executable(sample main.cpp)
 
 if (WIN32)
@@ -103,7 +103,7 @@ endif()
 Using http_client in your code:<br />
 ```c++
 // sampel.cpp
-#include <http_cliet.h>
+#include <slicksocket/http_cliet.h>
 #include <iostream>
 
 using namespace slick::net;

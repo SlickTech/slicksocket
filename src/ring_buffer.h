@@ -1,7 +1,7 @@
 /***
  *  MIT License
  *
- *  Copyright (c) 2019 SlickTech <support@slicktech.org>
+ *  Copyright (c) 2018-2019 SlickTech <support@slicktech.org>
  *
  *  Permission is hereby granted, free of charge, to any person obtaining a copy
  *  of this software and associated documentation files (the "Software"), to deal
@@ -122,6 +122,197 @@ class ring_buffer {
   const size_t mask_;
   std::atomic<size_t> cursor_ {0};
   std::atomic<size_t> reserved_ {0};
+};
+
+class scoped_flag final {
+ public:
+  explicit scoped_flag(std::atomic_bool& flag) : flag_(flag) { flag_.store(true, std::memory_order_release); }
+  ~scoped_flag() { flag_.store(false, std::memory_order_release); }
+ private:
+  std::atomic_bool& flag_;
+};
+
+class ring_string_buffer {
+ private:
+  enum class flag : uint8_t {
+    OK = 0,
+    INVALID,
+    SKIP,
+  };
+ public:
+  ring_string_buffer(size_t size)
+      : buffer_(new char[size])
+      , size_(size)
+      , mask_(size - 1)
+  {
+    assert(size && !(size & mask_));
+  }
+
+  ~ring_string_buffer() {
+    delete[] buffer_;
+  }
+
+  ring_string_buffer(const ring_string_buffer&) = delete;
+  ring_string_buffer(ring_string_buffer&&) = delete;
+  ring_string_buffer& operator=(const ring_string_buffer&) = delete;
+  ring_string_buffer& operator=(ring_string_buffer&&) = delete;
+
+
+  bool write(const char* const msg, size_t len, size_t remaining = 0) {
+    if (resetting_.load(std::memory_order_relaxed) || len == 0) {
+      return false;
+    }
+
+    scoped_flag sf(writing_);
+    uint32_t reset_count = reset_count_;
+
+    // message format
+    // <-- flag (1 byte) --><-- len (4 bytes) --><-- content -->
+
+    if (writing_cursor_ == 0) {  // write a new string
+      total_ = len + remaining + 5;
+      remaining_ = len + remaining;
+      if (total_ >= size_) {
+        writing_cursor_ = 1;
+        remaining_ -= len;
+        skip_ = true;
+        assert(false);
+        return false;
+      }
+
+      writing_begin_ = writing_cursor_ = reserved_.fetch_add(total_);
+      auto index = writing_begin_ & mask_;
+      if ((index + total_) >= size_) {
+        // remaining buffer is not enough to hold the string
+        // set flag to SKIP and start from the beginning
+        auto padding_sz = size_ - index;
+        reserved_.fetch_add(padding_sz);
+
+        *reinterpret_cast<flag*>(&buffer_[writing_cursor_ & mask_]) = flag::SKIP;
+        _notify(padding_sz);
+        writing_cursor_ = writing_begin_;
+      }
+
+      auto begin = writing_cursor_ & mask_;
+      auto end = (writing_cursor_ + total_) & mask_;
+      uint32_t i = 1;
+      while(!resetting_.load(std::memory_order_relaxed) &&
+          begin < reading_begin_.load(std::memory_order_relaxed) &&
+          end > reading_begin_.load(std::memory_order_relaxed)) {
+        // write and read overlap, wait for reading cursor advance
+        if ((i++% 50) == 0) {
+          printf("Slow consumer. begin=%llu, end=%llu, read_index=%llu, retry_count=%d\n",
+                 begin,
+                 end,
+                 reading_begin_.load(std::memory_order_relaxed),
+                 i);
+        }
+        std::this_thread::yield();
+      }
+
+      if (reset_count != reset_count_) {
+        // buffer reset, bail out
+        writing_cursor_ = 0;
+        skip_ = false;
+        return false;
+      }
+
+      *reinterpret_cast<flag*>(&buffer_[writing_cursor_++ & mask_]) = flag::OK;
+      *reinterpret_cast<uint32_t*>(&buffer_[writing_cursor_ & mask_]) = (uint32_t)total_ - 5;
+      writing_cursor_ += 4;
+    }
+
+    remaining_ -= len;
+    assert(remaining_ == remaining);
+
+    if (remaining_ == remaining && !skip_) {
+      memcpy(&buffer_[writing_cursor_ & mask_], msg, len);
+      writing_cursor_ += len;
+    }
+
+    if (remaining == 0) {
+      if (!skip_) {
+        if (remaining_ != remaining) {
+          printf("message messed up, mark buffer invalid. begin=%llu", writing_begin_);
+          *reinterpret_cast<flag*>(&buffer_[writing_begin_ & mask_]) = flag::INVALID;
+        }
+        _notify(total_);
+      }
+      // string completed
+      writing_cursor_ = 0;
+      skip_ = false;
+    }
+    return true;
+  }
+
+  std::pair<const char*, size_t> read() noexcept {
+    auto cursor = cursor_.load(std::memory_order_relaxed);
+    if (!resetting_.load(std::memory_order_relaxed)
+        && reading_begin_.load(std::memory_order_relaxed) != (cursor & mask_)) {
+      auto flg = *reinterpret_cast<flag*>(&buffer_[reading_cursor_++ & mask_]);
+      switch (flg) {
+        case flag::SKIP: {
+          auto index = reading_cursor_ & mask_;
+          reading_cursor_ += index ? size_ - index : 0;
+          reading_begin_.store(reading_cursor_ & mask_, std::memory_order_release);
+          return std::make_pair(nullptr, 0);
+        }
+        case flag::INVALID: {
+          auto len = *reinterpret_cast<uint32_t*>(&buffer_[reading_cursor_ & mask_]);
+          reading_cursor_ += len + 4;
+          reading_begin_.store(reading_cursor_ & mask_, std::memory_order_release);
+          return std::make_pair(nullptr, 0);
+        }
+        case flag::OK:
+          break;
+      }
+
+      auto len = *reinterpret_cast<uint32_t*>(&buffer_[reading_cursor_ & mask_]);
+      auto cur = reading_cursor_ + 4;
+      reading_cursor_ += len + 4;
+      const char* str = &buffer_[cur & mask_];
+      reading_begin_.store(reading_cursor_ & mask_, std::memory_order_release);
+      return std::make_pair(str, len);
+    }
+    return std::make_pair(nullptr, 0);
+  }
+
+  void reset() noexcept {
+    ++reset_count_;
+    scoped_flag sf(resetting_);
+    while (writing_.load(std::memory_order_relaxed)); // wait for writing complete;
+    reserved_.store(0, std::memory_order_relaxed);
+    cursor_.store(0, std::memory_order_relaxed);
+    reading_cursor_ = cursor_.load(std::memory_order_relaxed);
+    writing_begin_ = 0;
+    writing_cursor_ = 0;
+    reading_begin_.store(reading_cursor_ & mask_, std::memory_order_release);
+  }
+
+ private:
+  void _notify(size_t num) {
+    while(cursor_.load(std::memory_order_relaxed) != writing_begin_) { std::this_thread::yield(); }
+    cursor_.fetch_add(num);
+    writing_begin_ += num;
+  }
+
+ private:
+  char* buffer_;
+  const size_t size_;
+  const size_t mask_;
+
+  size_t writing_cursor_ {0};
+  size_t writing_begin_ {0};
+  size_t reading_cursor_ {0};
+  size_t total_ {0};
+  size_t remaining_ {0};
+  uint32_t reset_count_ {0};
+  bool skip_ { false };
+  std::atomic<size_t> cursor_ {0};
+  std::atomic<size_t> reserved_ {0};
+  std::atomic<size_t> reading_begin_ {0};
+  std::atomic_bool writing_ {false};
+  std::atomic_bool resetting_ {false};
 };
 
 }
