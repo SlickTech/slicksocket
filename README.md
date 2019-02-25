@@ -6,16 +6,16 @@ There are few C++ HTTP libraries out there, but most of them are lack of ssl sup
  the libraries I have used before are good, such as cpprestsdk, Beasts, libwebsockets etc., but 
  either they have a big footprint, or not easy to setup and use, especially on Windows. 
  
-Slicksocket is build on top [libwebsockets](https://libwebsockets.org). Libwebsockets is a 
-great C library. It not only support both client and server, but also support ton of protocols
+Slicksocket is build on top of [libwebsockets](https://libwebsockets.org). Libwebsockets is a 
+great C library. It not only support both client and server, but also support most of protocols
 including latest HTTP2 and WSS2. Although Libwebsockets provided 50 minimal examples, but it
-is missing a good tutorial and user guid. For a new user, it will take some time to learn and 
-figure out how to make things work. So here comes Slicksocket. The goal of Slicksocket is to 
-provide a lightweight, easy to use modern C++ library.
+is missing a good tutorial and user guide. For a new user, it will take some time to learn and 
+figure out how to make things work. The goal of Slicksocket is to remove the hussle away by providing
+a lightweight, easy to use modern C++ library.
 
 ## What make Slicksocket stands out?
 * Use latest C++ 11/14 standard.
-* Cross-platform. Easy to compile and use on Windows.
+* Cross-platform. Easy to compile and use on Windows, Linux and Mac OS X.
 * Support HTTP/HTTPS and WebSocket.
 * Only depends on libwebsockets (and Of cause OpenSSL for HTTPS).
 * Lock-free design, have very good performance.
@@ -161,5 +161,5 @@ int main(int argc, char* argv[]) {
 ```
 
 ## Caveats
-* Does not support HTTP/WebSocket server at moment
+* Does not support HTTP/WebSocket server at the moment
 * Need multipart form-data support.
