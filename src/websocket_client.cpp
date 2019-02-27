@@ -51,10 +51,6 @@ struct client_info {
   lws_client_connect_info cci;
   core::ring_string_buffer sending_buffer;
   std::atomic_bool shutdown {false};
-  char* receiving_buffer = nullptr;
-  char* receiving_ptr = nullptr;
-  size_t data_sz = 0;
-
 
   client_info() : sending_buffer(4096) {}
   client_info(std::string addr, std::string pth, websocket_callback* cb)
@@ -62,8 +58,12 @@ struct client_info {
     , address(std::move(addr))
     , path(std::move(pth))
     , sending_buffer(4096)
-  {}
+  {
+    memset(&cci, 0, sizeof(cci));
+  }
 };
+
+static std::string ssl_ca_file_path_;
 
 class websocket_service {
 
@@ -71,8 +71,6 @@ class websocket_service {
   lws_context *context_ = nullptr;
   uint64_t cursor_ = 0;
   std::atomic_bool run_{true};
-  lws_context_creation_info context_info_;
-  std::string ssl_ca_file_path_;
   ring_buffer<std::shared_ptr<client_info>> queue_;
 
  public:
@@ -81,29 +79,37 @@ class websocket_service {
     return instance;
   }
 
-  void add_client(std::shared_ptr<client_info> info) {
+  bool add_client(const std::shared_ptr<client_info>& info) {
+    if (!context_) {
+      info->callback->on_error("Failed to create lws_context.", 29);
+      return false;
+    }
+
     auto slot = queue_.reserve();
     auto& ci = slot[0];
     ci = info;
+	slot.publish();
+    return true;
   }
 
  private:
-  websocket_service(std::string ssl_ca_file_path = "")
-    : ssl_ca_file_path_(std::move(ssl_ca_file_path))
-    , queue_(256)
+  websocket_service()
+    : queue_(256)
   {
-    memset(&context_info_, 0, sizeof(context_info_));
+    lws_context_creation_info context_info;
+    memset(&context_info, 0, sizeof(context_info));
 
-    context_info_.options = LWS_SERVER_OPTION_DO_SSL_GLOBAL_INIT;
-    context_info_.port = CONTEXT_PORT_NO_LISTEN;
-    context_info_.protocols = s_protocols;
-    context_info_.ka_time = 5;
-    context_info_.ka_probes = 5;
-    context_info_.ka_interval = 1;
+    context_info.options = LWS_SERVER_OPTION_DO_SSL_GLOBAL_INIT;
+    context_info.port = CONTEXT_PORT_NO_LISTEN;
+    context_info.protocols = s_protocols;
+    context_info.ka_time = 5;
+    context_info.ka_probes = 5;
+    context_info.ka_interval = 1;
     if (!ssl_ca_file_path_.empty()) {
-      context_info_.client_ssl_ca_filepath = ssl_ca_file_path_.c_str();
+      context_info.client_ssl_ca_filepath = ssl_ca_file_path_.c_str();
     }
 
+    context_ = lws_create_context(&context_info);
     thread_ = std::thread([this]() { serve(); });
   }
 
@@ -128,10 +134,9 @@ class websocket_service {
       sn = queue_.available();
       if (cursor_ != sn) {
         auto client = queue_[cursor_++];
-        clients.emplace(std::move(client));
+        clients.emplace(client);
 
         auto& cci = client->cci;
-        memset(&cci, 0, sizeof(cci));
         cci.address = client->address.c_str();
         cci.host = cci.address;
         cci.origin = cci.address;
@@ -191,8 +196,6 @@ int ws_callback(struct lws *wsi, enum lws_callback_reasons reason, void *user, v
       break;
 
     case LWS_CALLBACK_CLIENT_ESTABLISHED:
-      delete [] client->receiving_buffer;
-      client->receiving_buffer = nullptr;
       client->sending_buffer.reset();
       client->callback->on_connected();
       break;
@@ -212,24 +215,7 @@ int ws_callback(struct lws *wsi, enum lws_callback_reasons reason, void *user, v
 
     case LWS_CALLBACK_CLIENT_RECEIVE: {
       auto remaining = lws_remaining_packet_payload(wsi);
-      if (remaining != 0) {
-        // partial message
-        if (!client->receiving_buffer) {
-          client->data_sz = len + remaining;
-          client->receiving_buffer = new char[client->data_sz];
-          client->receiving_ptr = client->receiving_buffer;
-        }
-        lws_snprintf(client->receiving_ptr, len, "%.*s", len, in);
-        client->receiving_ptr += len;
-      } else if (client->receiving_buffer) {
-        // message completed
-        client->callback->on_data(client->receiving_buffer, client->data_sz);
-        delete [] client->receiving_buffer;
-        client->receiving_buffer = nullptr;
-      } else {
-        // the package contains a whole message
-        client->callback->on_data((const char*)in, len);
-      }
+      client->callback->on_data((const char*)in, len, remaining);
       break;
     }
 
@@ -258,26 +244,29 @@ websocket_client::websocket_client(websocket_callback* callback, std::string add
   : callback_(callback)
   , info_(std::make_shared<client_info>(std::move(address), std::move(path), callback)) {
   auto pos = info_->address.find(':');
-  if (pos != std::string::npos) {
+  if (pos != 3 && pos != 4 && pos != std::string::npos) {
     info_->cci.port = std::stoi(address.substr(pos + 1));
   }
 
-  if (info_->address.find("https:////") != std::string::npos) {
-    info_->address = (pos != std::string::npos) ? info_->address.substr(8, pos - 8) : info_->address.substr(8);
-    if (info_->cci.port == -1) {
+  if (info_->address.find("wss://") != std::string::npos) {
+    info_->address = (pos != std::string::npos) ? info_->address.substr(6, pos - 6) : info_->address.substr(8);
+    if (info_->cci.port == 0) {
       info_->cci.port = 443;
     }
-  } else if (info_->address.find("http:////") != std::string::npos) {
-    info_->address = (pos != std::string::npos) ? info_->address.substr(7, pos - 7) : info_->address.substr(7);
-    if (info_->cci.port == -1) {
+  } else if (info_->address.find("ws://") != std::string::npos) {
+    info_->address = (pos != std::string::npos) ? info_->address.substr(5, pos - 5) : info_->address.substr(7);
+    if (info_->cci.port == 0) {
       info_->cci.port = 80;
     }
   }
 }
 
+void websocket_client::set_ssl_certificate_file_path(std::string ca_path) {
+  ssl_ca_file_path_ = std::move(ca_path);
+}
+
 bool websocket_client::connect() {
-  websocket_service::get().add_client(info_);
-  return true;
+  return websocket_service::get().add_client(info_);
 }
 
 void websocket_client::stop() {

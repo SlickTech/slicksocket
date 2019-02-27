@@ -284,10 +284,10 @@ class http_client::http_client_impl final {
 } //namespace slick
 
 http_client::http_client(std::string address, int16_t port, std::string ca_file_path, int32_t cpu_affinity) {
-  if (address.find("https:////") == 0) {
+  if (address.find("https://") == 0) {
     port = port != -1 ? port : 443;
     impl_ = std::make_unique<http_client_impl>(address.substr(8), port, std::move(ca_file_path), cpu_affinity);
-  } else if (address.find("http:////") == 0) {
+  } else if (address.find("http://") == 0) {
     port = port != -1 ? port : 80;
     impl_ = std::make_unique<http_client_impl>(address.substr(7), port, std::move(ca_file_path), cpu_affinity);
   } else {

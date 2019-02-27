@@ -30,13 +30,31 @@
 namespace slick {
 namespace net {
 
+/**
+ * websocket callback
+ */
 class websocket_callback {
  public:
   virtual ~websocket_callback() = default;
   virtual void on_connected() = 0;
   virtual void on_disconnected() = 0;
+
+  /**
+   * on_error invoked when error occurred
+   *
+   * @param msg     Error message. Might be empty.
+   * @param len     Error message length
+   */
   virtual void on_error(const char* msg, size_t len) = 0;
-  virtual void on_data(const char* data, size_t len) = 0;
+
+  /**
+   * on_data invoked when data received
+   *
+   * @param data        Data string
+   * @param len         Current data length
+   * @param remaining   How many data remains
+   */
+  virtual void on_data(const char* data, size_t len, size_t remaining) = 0;
 };
 
 struct client_info;
