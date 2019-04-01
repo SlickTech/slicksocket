@@ -23,40 +23,154 @@
  */
 
 #include "slicksocket/http_client.h"
-#include "ring_buffer.h"
-#include <libwebsockets.h>
+#include "utils.h"
 #include <atomic>
-#include <mutex>
-#include <unordered_set>
-#include <thread>
+#include "socket_service.h"
 
-using namespace slick::core;
 using namespace slick::net;
 
-namespace {
-struct request_info {
-  uint32_t status = 0;
-  const char* method;
-  std::shared_ptr<http_request> request;
-  std::function<void(http_response)> callback = nullptr;
-  std::stringstream response;
-  char content_type[512];
-  lws *wsi;
-  char buffer[2048 + LWS_PRE];
-  char *px = buffer + LWS_PRE;
-  int buffer_len = sizeof(buffer) - LWS_PRE;
-  std::atomic_bool completed {false};
-};
+http_client::http_client(std::string address,
+                         std::string origin,
+                         std::string ca_file_path,
+                         int32_t cpu_affinity,
+                         bool use_global_thread)
+  : service_(use_global_thread
+      ? socket_service::global(ca_file_path, cpu_affinity) : new socket_service(std::move(ca_file_path), cpu_affinity))
+  , address_(std::move(address))
+  , origin_(std::move(origin)) {
 
-inline int http_callback(struct lws *wsi, enum lws_callback_reasons reason, void* user, void* in, size_t len) {
-  auto req = (request_info*)lws_wsi_user(wsi);
+  auto pos = address_.find(':');
+  bool has_port = pos != 4 && pos !=5 && pos != std::string::npos;
+  if (has_port) {
+    port_ = std::stoi(address_.substr(pos + 1));
+  }
+
+  if (address_.find("https://") != std::string::npos) {
+    address_ = has_port ? address_.substr(8, pos - 8) : address_.substr(8);
+    if (port_ == -1) {
+      port_ = 443;
+    }
+  } else if (address_.find("http://") != std::string::npos) {
+    address_ = has_port ? address_.substr(7, pos - 7) : address_.substr(7);
+    if (port_ == 0) {
+      port_ = 80;
+    }
+  }
+}
+
+http_client::~http_client() {
+  if (service_ && !service_->is_global()) {
+    delete service_;
+    service_ = nullptr;
+  }
+}
+
+http_response http_client::request(const char* method, std::string path, const std::shared_ptr<http_request>& request) {
+  auto req = service_->get_http_request();
+  if (!req) {
+    return http_response(500, "", "Failed to create lws_context");
+  }
+  req->path = std::move(path);
+  memset(&req->cci, 0, sizeof(req->cci));
+  req->cci.port = port_;
+  req->cci.address = address_.c_str();
+  req->cci.host = req->cci.address;
+  if (!origin_.empty()) {
+    req->cci.origin = origin_.c_str();
+  }
+  req->cci.alpn = "http/1.1";
+  req->cci.path = req->path.c_str();
+  req->cci.pwsi = &req->wsi;
+  req->cci.userdata = req;
+  req->cci.protocol = "http";
+  req->cci.method = method;
+
+  if (port_ == 443) {
+    req->cci.ssl_connection = LCCSCF_USE_SSL;
+  }
+
+  req->request = request;
+  req->callback = nullptr;
+  service_->request(req);
+  while (!req->completed.load(std::memory_order_relaxed));
+  http_response response(req->status, req->content_type, req->response.str());
+  service_->release_request(req);
+  return response;
+}
+
+void http_client::request(const char* method, std::string path, AsyncCallback&& callback) {
+  auto req = service_->get_http_request();
+  if (!req) {
+    callback(http_response(500, "", "Failed to create lws_context"));
+    return;
+  }
+  req->type = request_type::http;
+  req->path = std::move(path);
+  memset(&req->cci, 0, sizeof(req->cci));
+  req->cci.port = port_;
+  req->cci.address = address_.c_str();
+  req->cci.host = req->cci.address;
+  req->cci.origin = req->cci.address;
+  req->cci.alpn = "http/1.1";
+  req->cci.path = req->path.c_str();
+  req->cci.pwsi = &req->wsi;
+  req->cci.userdata = req;
+  req->cci.protocol = "http";
+  req->cci.method = method;
+
+  if (port_ == 443) {
+    req->cci.ssl_connection = LCCSCF_USE_SSL;
+  }
+
+  req->request = nullptr;
+  req->callback = callback;
+  service_->request(req);
+}
+
+void http_client::request(const char *method,
+                          std::string path,
+                          const std::shared_ptr<http_request>& request,
+                          AsyncCallback &&callback) {
+  auto req = service_->get_http_request();
+  if (!req) {
+    callback(http_response(500, "", "Failed to create lws_context"));
+    return;
+  }
+  req->type = request_type::http;
+  req->path = std::move(path);
+  memset(&req->cci, 0, sizeof(req->cci));
+  req->cci.port = port_;
+  req->cci.address = address_.c_str();
+  req->cci.host = req->cci.address;
+  req->cci.origin = req->cci.address;
+  req->cci.alpn = "http/1.1";
+  req->cci.path = req->path.c_str();
+  req->cci.pwsi = &req->wsi;
+  req->cci.userdata = req;
+  req->cci.protocol = "http";
+  req->cci.method = method;
+
+  if (port_ == 443) {
+    req->cci.ssl_connection = LCCSCF_USE_SSL;
+  }
+
+  req->request = request;
+  req->callback = callback;
+  service_->request(req);
+}
+
+int http_callback(struct lws *wsi, enum lws_callback_reasons reason, void* user, void* in, size_t len) {
+  auto req = (http_request_info*)lws_wsi_user(wsi);
 
   switch (reason) {
     case LWS_CALLBACK_CLIENT_CONNECTION_ERROR:
-      req->response << req->request->path() << " error occurred. ";
+      lwsl_user("%s:%d Connection error occurred. ", req->cci.address, req->cci.port);
+      req->response << req->path << " error occurred. ";
       if (in && len) {
-         req->response << std::string((char*)in, len);
+        req->response << std::string((char*)in, len);
+        lwsl_user("%s", in);
       }
+      lwsl_user("\n");
       req->wsi = nullptr;
       req->completed.store(true, std::memory_order_release);
       break;
@@ -65,9 +179,13 @@ inline int http_callback(struct lws *wsi, enum lws_callback_reasons reason, void
       unsigned char **p = (unsigned char **) in, *end = (*p) + len - 1;
       if (lws_add_http_header_by_token(wsi, WSI_TOKEN_HTTP_USER_AGENT, (unsigned char*)"libwebsocket", 12, p, end)) {
         req->wsi = nullptr;
-        req->response << req->request->path() << " failed to add User-Agent header";
+        req->response << req->path << " failed to add User-Agent header";
         req->completed.store(true, std::memory_order_release);
         return -1;
+      }
+
+      if (!req->request) {
+        break;
       }
 
       if (!req->request->headers().empty()) {
@@ -79,7 +197,7 @@ inline int http_callback(struct lws *wsi, enum lws_callback_reasons reason, void
                                           p,
                                           end)) {
             req->wsi = nullptr;
-            req->response << req->request->path() << " failed to add header " << kvp.first << ": " << kvp.second;
+            req->response << req->path << " failed to add header " << kvp.first << ": " << kvp.second;
             req->completed.store(true, std::memory_order_release);
             return -1;
           }
@@ -87,7 +205,7 @@ inline int http_callback(struct lws *wsi, enum lws_callback_reasons reason, void
       }
 
       const auto& content_type = req->request->content_type();
-	  if (!content_type.empty()) {
+      if (!content_type.empty()) {
         if (lws_add_http_header_by_token(wsi,
                                          WSI_TOKEN_HTTP_CONTENT_TYPE,
                                          (unsigned char *) content_type.c_str(),
@@ -95,15 +213,16 @@ inline int http_callback(struct lws *wsi, enum lws_callback_reasons reason, void
                                          p,
                                          end)) {
           req->wsi = nullptr;
-          req->response << req->request->path() << " failed to add header Content-Type:" << content_type;
+          req->response << req->path << " failed to add header Content-Type:" << content_type;
           req->completed.store(true, std::memory_order_release);
           return -1;
         }
-	  }
+      }
 
-	  const auto& body = req->request->body();
-	  if (!body.empty()) {
-	    std::string sz = std::to_string(body.size());
+
+      const auto& body = req->request->body();
+      if (!body.empty()) {
+        std::string sz = std::to_string(body.size());
         if (lws_add_http_header_by_token(wsi,
                                          WSI_TOKEN_HTTP_CONTENT_LENGTH,
                                          (unsigned char *) sz.c_str(),
@@ -111,24 +230,28 @@ inline int http_callback(struct lws *wsi, enum lws_callback_reasons reason, void
                                          p,
                                          end)) {
           req->wsi = nullptr;
-          req->response << req->request->path() << " failed to add header Content-Length:" << sz;
+          req->response << req->path << " failed to add header Content-Length:" << sz;
           req->completed.store(true, std::memory_order_release);
           return -1;
         }
-	    lws_client_http_body_pending(wsi, 1);
-	    lws_callback_on_writable(wsi);
-	  }
+        lws_client_http_body_pending(wsi, 1);
+        lws_callback_on_writable(wsi);
+      }
       break;
     }
 
     case LWS_CALLBACK_CLIENT_HTTP_WRITEABLE: {
       auto p = (unsigned char*)&req->buffer[LWS_PRE];
+	  if (!req->request) {
+		  break;
+	  }
+
       const auto& body = req->request->body();
       auto sz = body.size() + 1;
 
       if (sz > sizeof(req->buffer) - LWS_PRE) {
         req->wsi = nullptr;
-        req->response << req->request->path() << " body exceeds buffer size";
+        req->response << req->path << " body exceeds buffer size";
         req->completed.store(true, std::memory_order_release);
         return -1;
       }
@@ -138,7 +261,7 @@ inline int http_callback(struct lws *wsi, enum lws_callback_reasons reason, void
 
       if (lws_write(wsi, p, n, LWS_WRITE_HTTP_FINAL) != n) {
         req->wsi = nullptr;
-        req->response << req->request->path() << " failed to write body";
+        req->response << req->path << " failed to write body";
         req->completed.store(true, std::memory_order_release);
         return -1;
       }
@@ -183,217 +306,4 @@ inline int http_callback(struct lws *wsi, enum lws_callback_reasons reason, void
       break;
   }
   return lws_callback_http_dummy(wsi, reason, user, in, len);
-}
-
-const struct lws_protocols s_protocols[] = {
-    { "http", http_callback, 0, 0 },
-    { nullptr, nullptr, 0, 0 }
-};
-
-std::once_flag s_init;
-
-} // namespace
-
-namespace slick {
-namespace net {
-
-class http_client::http_client_impl final {
-  uint64_t cursor_ = 0;
-  lws_context *context_ = nullptr;
-  int32_t cpu_affinity_ = -1;
-  int16_t port_ = 0;
-  std::atomic_bool run_ {true};
-  lws_client_connect_info cci_;
-  std::string address_;
-  std::string ssl_ca_file_path_;
-  std::thread thread_;
-  ring_buffer<request_info> queue_;
-
- public:
-  http_client_impl(std::string&& address, int16_t port, std::string&& ca_path, int32_t cpu_affinity = -1)
-    : cpu_affinity_(cpu_affinity)
-    , port_(port)
-    , address_(std::move(address))
-    , ssl_ca_file_path_(std::move(ca_path))
-    , queue_(65536) {
-
-#ifndef NDEBUG
-    std::call_once(s_init, []() {
-      lws_set_log_level(LLL_NOTICE | LLL_WARN | LLL_INFO | LLL_ERR | LLL_USER, nullptr);
-    });
-#endif
-
-    lws_context_creation_info info;
-    memset(&info, 0, sizeof(info));
-
-    info.options = LWS_SERVER_OPTION_DO_SSL_GLOBAL_INIT;
-    info.port = CONTEXT_PORT_NO_LISTEN;
-    info.protocols = s_protocols;
-    info.ka_time = 5;
-    info.ka_probes = 5;
-    info.ka_interval = 1;
-    if (!ssl_ca_file_path_.empty()) {
-      info.client_ssl_ca_filepath = ssl_ca_file_path_.c_str();
-    }
-
-    context_ = lws_create_context(&info);
-    if (!context_) {
-      throw std::runtime_error("Failed to create lws_context");
-    }
-
-    thread_ = std::thread(&http_client_impl::run, this);
-
-    memset(&cci_, 0, sizeof(cci_));
-	cci_.port = port_;
-    cci_.address = address_.c_str();
-    cci_.host = cci_.address;
-    cci_.origin = cci_.address;
-    cci_.protocol = s_protocols[0].name;
-    cci_.context = context_;
-    cci_.alpn = "http/1.1";
-
-	if (port_ == 443) {
-		cci_.ssl_connection = LCCSCF_USE_SSL;
-	}
-  }
-
-  ~http_client_impl() {
-    run_.store(false, std::memory_order_relaxed);
-
-    if (thread_.joinable()) {
-      thread_.join();
-    }
-
-    if (context_) {
-      lws_context_destroy(context_);
-      context_ = nullptr;
-    }
-  }
-
- public:
-  inline http_response request(const char *method, std::shared_ptr<http_request> &&request);
-  inline void request(const char *method,
-                      std::shared_ptr<http_request> &&request,
-                      http_client::AsyncCallback &&callback);
-
- private:
-  inline void run();
-};
-
-} //namespace net
-} //namespace slick
-
-http_client::http_client(std::string address, int16_t port, std::string ca_file_path, int32_t cpu_affinity) {
-  if (address.find("https://") == 0) {
-    port = port != -1 ? port : 443;
-    impl_ = std::make_unique<http_client_impl>(address.substr(8), port, std::move(ca_file_path), cpu_affinity);
-  } else if (address.find("http://") == 0) {
-    port = port != -1 ? port : 80;
-    impl_ = std::make_unique<http_client_impl>(address.substr(7), port, std::move(ca_file_path), cpu_affinity);
-  } else {
-    impl_ = std::make_unique<http_client_impl>(address.substr(7), port, std::move(ca_file_path), cpu_affinity);
-  }
-}
-
-http_client::http_client(std::string address)
-  : http_client(std::move(address), -1, "", -1) {
-}
-
-http_client::http_client(std::string address, int32_t cpu_affinity)
-  : http_client(std::move(address), -1, "", cpu_affinity) {
-
-}
-http_client::http_client(std::string address, std::string ca_file_path, int32_t cpu_affinity)
-  : http_client(std::move(address), -1, std::move(ca_file_path), cpu_affinity) {
-}
-
-http_client::~http_client() {}
-
-http_response http_client::request(const char* method, std::string path) {
-  return impl_->request(method, std::make_shared<http_request>(std::move(path)));
-}
-
-http_response http_client::request(const char* method, std::shared_ptr<http_request> request) {
-  return impl_->request(method, std::move(request));
-}
-
-void http_client::request(const char* method, std::string path, AsyncCallback&& callback) {
-  impl_->request(method, std::make_shared<http_request>(std::move(path)), std::move(callback));
-}
-void http_client::request(const char* method, std::shared_ptr<http_request> request, AsyncCallback&& callback) {
-	impl_->request(method, std::move(request), std::move(callback));
-}
-
-//******************** http_client_impl implementation ********************
-
-inline void http_client::http_client_impl::run() {
-  std::unordered_set<request_info*> requests;
-
-  if (cpu_affinity_ != -1) {
-#ifdef WIN32
-    auto thrd = GetCurrentThread();
-    SetThreadAffinityMask(thrd, 1LL << (cpu_affinity_ % std::thread::hardware_concurrency()));
-#else
-    cpu_set_t cpus;
-    CPU_ZERO(&cpus);
-    CPU_SET((cpu_affinity_ % std::thread::hardware_concurrency()), &cpus);
-    pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpus);
-#endif
-  }
-
-  uint64_t sn = 0;
-  while (run_.load(std::memory_order_relaxed)) {
-    sn = queue_.available();
-    if (cursor_ != sn) {
-      auto& req = queue_[cursor_++];
-      requests.emplace(&req);
-
-      lws_client_connect_info cci;
-      memcpy(&cci, &cci_, sizeof(cci));
-      cci.path = req.request->path().c_str();
-      cci.pwsi = &req.wsi;
-      cci.method = req.method;
-      cci.userdata = &req;
-
-      lws_client_connect_via_info(&cci);
-    }
-
-    if (!requests.empty()) {
-      lws_service(context_, 0);
-    }
-
-    for (auto it = requests.begin(); it != requests.end();) {
-      auto req = *it;
-      if (req->completed.load(std::memory_order_relaxed)) {
-        if (req->callback) {
-          req->callback(http_response(req->status, req->content_type, req->response.str()));
-        }
-        it = requests.erase(it);
-      } else {
-        ++it;
-      }
-    }
-  }
-}
-
-http_response http_client::http_client_impl::request(const char* method, std::shared_ptr<http_request> &&request) {
-  auto slot = queue_.reserve();
-  auto& req = slot[0];
-  req.request = std::move(request);
-  req.callback = nullptr;
-  req.method = method;
-  slot.publish();
-  while (!req.completed.load(std::memory_order_relaxed));
-  return http_response(req.status, "", req.response.str());
-}
-
-inline void http_client::http_client_impl::request(const char *method,
-                                                   std::shared_ptr<http_request> &&request,
-                                                   http_client::AsyncCallback &&callback) {
-	auto slot = queue_.reserve();
-	auto& req = slot[0];
-	req.request = std::move(request);
-	req.callback = std::move(callback);
-	req.method = method;
-	slot.publish();
 }

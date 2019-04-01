@@ -30,6 +30,7 @@
 #include <functional>
 #include <sstream>
 #include <memory>
+#include <thread>
 
 namespace slick {
 namespace net {
@@ -39,7 +40,6 @@ namespace net {
  */
 struct http_request {
  private:
-  std::string path_;
   std::string body_;
   std::string content_type_;
 
@@ -50,7 +50,6 @@ struct http_request {
 
  public:
   http_request() = default;
-  explicit http_request(std::string &&p) : path_(std::move(p)) {}
 
   /**
    * Add a request header
@@ -73,12 +72,6 @@ struct http_request {
     body_ = std::move(body);
     content_type_ = std::move(content_type);
   }
-
-  /**
-   * Request Path
-   * @return Request path
-   */
-  const std::string& path() const noexcept { return path_; }
 
   /**
    * Request Headers
@@ -111,45 +104,36 @@ struct http_response {
       : status(stat), content_type(std::move(type)), response_text(std::move(response)) {}
 };
 
+// forward declaration
+class socket_service;
+
 /**
  * HTTP Client
  */
 class http_client {
+  socket_service* service_;
+  std::string address_;
+  std::string origin_;
+  int16_t port_ = -1;
+
  public:
   using AsyncCallback = std::function<void(http_response)>;
 
   /**
    * Constructor
-   * @param address     Request url.
+   * @param address             Request domain url.
+   * @param origin              The Origin of http request. Default to "".
+   * @param ca_file_path        ssl certificate file path. Default to "".
+   *                            In most of case, system should be able to find a suitable ssl certificate.
+   *                            If it can't find ssl certificate, pass in ca_file_path to specify a ssl certificate file.
+   * @param cpu_affinity        Pin service thread to specified CPU. Default to -1 means not pin to specific CPU.
+   * @param use_global_thread   Use
    */
-  explicit http_client(std::string address);
-
-  /**
-   * Constructor
-   * @param address         Request url.
-   * @param cpu_affinity    Receiving thread CPU affinity. If cpu_affinity is not -1, receiving thread will pin
-   *                        to the CPU core specified cpu_affinity.
-   */
-  http_client(std::string address, int32_t cpu_affinity);
-
-  /**
-   * Constructor
-   * @param address         Request url.
-   * @param ca_file_path    Certificate file path.
-   * @param cpu_affinity    Receiving thread CPU affinity. If cpu_affinity is not -1, receiving thread will pin
-   *                        to the CPU core specified cpu_affinity.
-   */
-  http_client(std::string address, std::string ca_file_path, int32_t cpu_affinity = -1);
-
-  /**
-   * Constructor
-   * @param address         Request url.
-   * @param port            request address port number.
-   * @param ca_file_path    Certificate file path.
-   * @param cpu_affinity    Receiving thread CPU affinity. If cpu_affinity is not -1, receiving thread will pin
-   *                        to the CPU core specified cpu_affinity.
-   */
-  http_client(std::string address, int16_t port, std::string ca_file_path, int32_t cpu_affinity = -1);
+  http_client(std::string address,
+              std::string origin = "",
+              std::string ca_file_path = "",
+              int32_t cpu_affinity = -1,
+              bool use_global_thread = false);
 
   virtual ~http_client();
 
@@ -157,22 +141,13 @@ class http_client {
 
   /**
    * Synchronous Request
-   *
    * @param method      HTTP request method. e.g. "GET", "POST', "PUT", "DELETE" etc.
    *                    NOTE: method must be all UPPER CASE
    * @param path        Request path.
-   * @return            Request response.
-   */
-  http_response request(const char* method, std::string path);
-
-  /**
-   * Synchronous Request
-   * @param method      HTTP request method. e.g. "GET", "POST', "PUT", "DELETE" etc.
-   *                    NOTE: method must be all UPPER CASE
    * @param request     Http request struct.
    * @return            Request response.
    */
-  http_response request(const char* method, std::shared_ptr<http_request> request);
+  http_response request(const char* method, std::string path, const std::shared_ptr<http_request>& request = nullptr);
 
   // Async requests
 
@@ -191,14 +166,12 @@ class http_client {
    *
    * @param method      HTTP request method. e.g. "GET", "POST', "PUT", "DELETE" etc.
    *                    NOTE: method must be all UPPER CASE
-   * @param path        Http request struct.
+   * @param path        Request path.
+   * @param request     Http request struct.
    * @param callback    Asynchronous callback function.
    */
-  void request(const char* method, std::shared_ptr<http_request> request, AsyncCallback&& callback);
+  void request(const char* method, std::string path, const std::shared_ptr<http_request>& request, AsyncCallback&& callback);
 
- private:
-  class http_client_impl;
-  std::unique_ptr<http_client_impl> impl_;
 };
 
 

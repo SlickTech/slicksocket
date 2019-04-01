@@ -28,9 +28,11 @@
 #include <atomic>
 #include <thread>
 #include <cassert>
+#include <cstring>
+#include <algorithm>
 
 namespace slick {
-namespace core {
+namespace net {
 
 template<typename T>
 class ring_buffer {
@@ -76,7 +78,7 @@ class ring_buffer {
     , size_(size)
     , mask_(size -1)
   {
-    assert(size && !(size & size -1));
+    assert(size && !(size & (size - 1)));
   }
 
   virtual ~ring_buffer() {
@@ -144,12 +146,14 @@ class ring_string_buffer {
       : buffer_(new char[size])
       , size_(size)
       , mask_(size - 1)
+	  , writing_{false}
   {
     assert(size && !(size & mask_));
   }
 
   ~ring_string_buffer() {
     delete[] buffer_;
+	buffer_ = nullptr;
   }
 
   ring_string_buffer(const ring_string_buffer&) = delete;
@@ -313,6 +317,65 @@ class ring_string_buffer {
   std::atomic<size_t> reading_begin_ {0};
   std::atomic_bool writing_ {false};
   std::atomic_bool resetting_ {false};
+};
+
+template<typename T>
+class object_pool final {
+  T* data_;
+  T* end_;
+  std::vector<size_t> index_;
+  std::atomic_size_t read_cursor_ {0};
+  std::atomic_size_t write_cursor_ {0};
+  const size_t size_;
+  const size_t mask_;
+
+ public:
+  object_pool(size_t size)
+    : data_(new T[size])
+    , end_(data_ + size)
+    , index_(size)
+    , size_(size)
+    , mask_(size - 1) {
+    assert(size && !(size & (size - 1))); // must power of 2
+    std::generate(index_.begin(), index_.end(), [n = 0]() mutable { return n++; });
+  }
+
+  ~object_pool() {
+    delete [] data_;
+    data_ = nullptr;
+  }
+
+  object_pool(const object_pool&) = delete;
+  object_pool(object_pool&&) = delete;
+  object_pool& operator=(const object_pool&) = delete;
+  object_pool& operator=(object_pool&&) = delete;
+
+  size_t size() const noexcept { return size_; }
+
+  T* get_obj() noexcept {
+    if (read_cursor_.load(std::memory_order_relaxed) < mask_) {
+      auto i = read_cursor_.fetch_add(1, std::memory_order_acq_rel);
+      if (i < size_ || (i & mask_) < (write_cursor_.load(std::memory_order_relaxed) & mask_)) {
+        return data_ + index_[i & mask_];
+      }
+      read_cursor_.fetch_sub(1, std::memory_order_acq_rel);
+    }
+
+    // all object pre-allocated are consumed, allocated on the heap
+    return new (std::nothrow) T;
+  }
+
+  void release_obj(T* obj) noexcept {
+    if (obj >= data_ && obj < end_) {
+      // this is pre-allocated object
+      auto index = obj - data_;
+      auto target = write_cursor_.fetch_add(1, std::memory_order_acq_rel);
+      index_[target & mask_] = index;
+      return;
+    }
+    // delete object allocated on the heap
+    delete obj;
+  }
 };
 
 }

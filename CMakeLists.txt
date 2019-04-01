@@ -37,7 +37,9 @@ set(SOURCES
         include/slicksocket/http_client.h
         include/slicksocket/websocket_client.h
         src/http_client.cpp
-        src/websocket_client.cpp)
+        src/websocket_client.cpp
+        src/socket_service.cpp
+        src/socket_service.h)
 
 if (WIN32)
     set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS ON)

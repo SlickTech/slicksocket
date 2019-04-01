@@ -26,6 +26,10 @@
 
 #include <cstdint>
 #include <string>
+#include <memory>
+
+// forward declaration
+enum lws_log_levels : int;
 
 namespace slick {
 namespace net {
@@ -36,7 +40,15 @@ namespace net {
 class websocket_callback {
  public:
   virtual ~websocket_callback() = default;
+
+  /**
+   * on_connected invoked when connection established
+   */
   virtual void on_connected() = 0;
+
+  /**
+   * on_disconnected invoked when connection closed
+   */
   virtual void on_disconnected() = 0;
 
   /**
@@ -57,28 +69,50 @@ class websocket_callback {
   virtual void on_data(const char* data, size_t len, size_t remaining) = 0;
 };
 
-struct client_info;
+struct ws_request_info;
+class socket_service;
 
 class websocket_client {
   websocket_callback *callback_;
-  int16_t port_ = -1;
+  ws_request_info* request_ = nullptr;
+  socket_service* service_ = nullptr;
   std::string address_;
+  std::string origin_;
   std::string path_;
+  int16_t port_ = -1;
 
  public:
-  websocket_client(websocket_callback *callback, std::string address, std::string path = "/");
-  virtual ~websocket_client() = default;
+  websocket_client(websocket_callback *callback,
+                   std::string address,
+                   std::string origin = "",
+                   std::string path = "/",
+                   std::string ca_file_path = "",
+                   int32_t cpu_affinity = -1,
+                   bool use_global_service = false);
 
-  static void set_ssl_certificate_file_path(std::string ca_path);
-  static void set_cpu_affinity(uint32_t cpu_affinity);
+  virtual ~websocket_client();
 
+  /**
+   * Connect to WebSocket server
+   * @return False if error occurred. Otherwise True.
+   */
   bool connect();
+
+  /**
+   * Stop WebSocket Client
+   */
   void stop();
 
+  /**
+   * Send message to WebSocket server
+   * @param msg     The message to send
+   * @param len     The length of the message
+   * @return        True on success. Otherwise False.
+   */
   bool send(const char* msg, size_t len);
 
  private:
-  std::shared_ptr<client_info> info_;
+//  std::shared_ptr<ws_request_info> info_;
 };
 
 } // namespace net
