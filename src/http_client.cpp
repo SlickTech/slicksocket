@@ -168,7 +168,7 @@ int http_callback(struct lws *wsi, enum lws_callback_reasons reason, void* user,
       req->response << req->path << " error occurred. ";
       if (in && len) {
         req->response << std::string((char*)in, len);
-        lwsl_user("%s", in);
+        lwsl_user("%s", (const char*)in);
       }
       lwsl_user("\n");
       req->wsi = nullptr;
@@ -270,7 +270,7 @@ int http_callback(struct lws *wsi, enum lws_callback_reasons reason, void* user,
 
     case LWS_CALLBACK_ESTABLISHED_CLIENT_HTTP: {
       req->status = lws_http_client_http_response(wsi);
-      assert(sizeof(req->content_type) > lws_hdr_total_length(wsi, WSI_TOKEN_HTTP_CONTENT_TYPE));
+      assert(sizeof(req->content_type) > (size_t)lws_hdr_total_length(wsi, WSI_TOKEN_HTTP_CONTENT_TYPE));
       lws_hdr_copy(wsi, req->content_type, sizeof(req->content_type), WSI_TOKEN_HTTP_CONTENT_TYPE);
       req->response.clear();
       break;

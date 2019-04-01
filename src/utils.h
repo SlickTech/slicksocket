@@ -32,7 +32,7 @@
 #endif
 #include <windows.h>
 #else
-#include <pthread>
+#include <pthread.h>
 #endif
 
 namespace slick {
@@ -46,7 +46,7 @@ inline void set_cpu_affinity(int32_t cpu_affinity) {
 #else
     cpu_set_t cpus;
     CPU_ZERO(&cpus);
-    CPU_SET((cpu_affinity_ % std::thread::hardware_concurrency()), &cpus);
+    CPU_SET((cpu_affinity % std::thread::hardware_concurrency()), &cpus);
     pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpus);
 #endif
   }

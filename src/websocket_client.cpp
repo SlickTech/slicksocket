@@ -154,7 +154,7 @@ int ws_callback(struct lws *wsi, enum lws_callback_reasons reason, void *user, v
     case LWS_CALLBACK_CLIENT_WRITEABLE: {
       auto msg = client->sending_buffer.read();
       if (msg.second) {
-        auto n = lws_write(wsi, (unsigned char*)msg.first + LWS_PRE, msg.second - LWS_PRE, LWS_WRITE_TEXT);
+        size_t n = lws_write(wsi, (unsigned char*)msg.first + LWS_PRE, msg.second - LWS_PRE, LWS_WRITE_TEXT);
         if (n < len) {
           client->wsi = nullptr;
           return -1;
@@ -177,6 +177,9 @@ int ws_callback(struct lws *wsi, enum lws_callback_reasons reason, void *user, v
 
     case LWS_CALLBACK_WSI_DESTROY:
       client->wsi = nullptr;
+      break;
+
+    default:
       break;
   }
 

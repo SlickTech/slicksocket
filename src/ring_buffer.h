@@ -30,6 +30,7 @@
 #include <cassert>
 #include <cstring>
 #include <algorithm>
+#include <vector>
 
 namespace slick {
 namespace net {
@@ -205,7 +206,7 @@ class ring_string_buffer {
           end > reading_begin_.load(std::memory_order_relaxed)) {
         // write and read overlap, wait for reading cursor advance
         if ((i++% 50) == 0) {
-          printf("Slow consumer. begin=%llu, end=%llu, read_index=%llu, retry_count=%d\n",
+          printf("Slow consumer. begin=%zu, end=%zu, read_index=%zu, retry_count=%d\n",
                  begin,
                  end,
                  reading_begin_.load(std::memory_order_relaxed),
@@ -237,7 +238,7 @@ class ring_string_buffer {
     if (remaining == 0) {
       if (!skip_) {
         if (remaining_ != remaining) {
-          printf("message messed up, mark buffer invalid. begin=%llu", writing_begin_);
+          printf("message messed up, mark buffer invalid. begin=%zu", writing_begin_);
           *reinterpret_cast<flag*>(&buffer_[writing_begin_ & mask_]) = flag::INVALID;
         }
         _notify(total_);

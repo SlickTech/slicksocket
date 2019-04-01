@@ -27,6 +27,7 @@
 #include <libwebsockets.h>
 #include <atomic>
 #include <sstream>
+#include <functional>
 #include "ring_buffer.h"
 
 namespace slick {

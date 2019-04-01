@@ -28,9 +28,6 @@
 #include <string>
 #include <memory>
 
-// forward declaration
-enum lws_log_levels : int;
-
 namespace slick {
 namespace net {
 
