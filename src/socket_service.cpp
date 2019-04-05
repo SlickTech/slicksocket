@@ -13,8 +13,8 @@ extern int ws_callback(struct lws *wsi, enum lws_callback_reasons reason, void *
 namespace {
 
 const struct lws_protocols s_protocols[] = {
-    {"http", http_callback, 0, 0},
     {"ws", ws_callback, 0, 0},
+    {"http", http_callback, 0, 0},
     {nullptr, nullptr, 0, 0}
 };
 
@@ -90,7 +90,7 @@ void socket_service::serve(int32_t cpu_affinity) {
       auto &cci = req->cci;
       cci.context = context_;
       requests.emplace(req);
-      lwsl_user("Connecting to %s:%d...\n", cci.address, cci.port);
+      lwsl_user("Connecting to %s:%d%s\n", cci.address, cci.port, cci.path);
       lws_client_connect_via_info(&cci);
     }
 
@@ -103,6 +103,7 @@ void socket_service::serve(int32_t cpu_affinity) {
       if (!req->wsi) {
         if (req->type == request_type::http) {
           auto http_req = (http_request_info*)req;
+          http_req->completed.store(true, std::memory_order_release);
           if (http_req->callback) {
             http_req->callback(http_response(http_req->status, http_req->content_type, http_req->response.str()));
             http_request_pool_.release_obj(http_req);

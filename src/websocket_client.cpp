@@ -67,6 +67,7 @@ websocket_client::~websocket_client() {
     delete service_;
     service_ = nullptr;
   }
+  stop();
 }
 
 bool websocket_client::connect() {
@@ -129,17 +130,20 @@ bool websocket_client::send(const char *msg, size_t len) {
 }
 
 int ws_callback(struct lws *wsi, enum lws_callback_reasons reason, void *user, void *in, size_t len) {
-  auto client = (ws_request_info*)lws_wsi_user(wsi);
-  if (!client) {
+  auto req = (request_info*)lws_wsi_user(wsi);
+  if (!req) {
     return lws_callback_http_dummy(wsi, reason, user, in, len);
   }
 
-  if (client->shutdown.load(std::memory_order_relaxed)) {
-    lwsl_user("Shutting down %s:%d...\n", client->cci.address, client->cci.port);
-    client->wsi = nullptr;
-    return -1;
+  // for some callback lws always invokes on the first protocol
+  if (req->type != request_type::ws) {
+    if (reason == LWS_CALLBACK_WSI_DESTROY) {
+      req->wsi = nullptr;
+    }
+    return lws_callback_http_dummy(wsi, reason, user, in, len);
   }
 
+  auto client = reinterpret_cast<ws_request_info*>(req);
   switch (reason) {
     case LWS_CALLBACK_CLIENT_CONNECTION_ERROR:
       client->wsi = nullptr;
@@ -149,6 +153,7 @@ int ws_callback(struct lws *wsi, enum lws_callback_reasons reason, void *user, v
     case LWS_CALLBACK_CLIENT_ESTABLISHED:
       client->sending_buffer.reset();
       client->callback->on_connected();
+      client->disconnecte_callback_invoked = false;
       break;
 
     case LWS_CALLBACK_CLIENT_WRITEABLE: {
@@ -173,18 +178,23 @@ int ws_callback(struct lws *wsi, enum lws_callback_reasons reason, void *user, v
     case LWS_CALLBACK_CLIENT_CLOSED:
       client->wsi = nullptr;
       client->callback->on_disconnected();
+      client->disconnecte_callback_invoked = true;
       break;
 
     case LWS_CALLBACK_WSI_DESTROY:
       client->wsi = nullptr;
+      if (!client->disconnecte_callback_invoked) {
+        client->callback->on_disconnected();
+        client->disconnecte_callback_invoked = true;
+      }
       break;
 
     default:
-      break;
+      return lws_callback_http_dummy(wsi, reason, user, in, len);
   }
 
-  if (client->shutdown.load(std::memory_order_relaxed)) {
-    lwsl_user("Shutting down %s:%d...\n", client->cci.address, client->cci.port);
+  if (client->wsi && client->shutdown.load(std::memory_order_relaxed)) {
+    lwsl_user("Shutting down %s:%d%s\n", client->cci.address, client->cci.port, client->cci.path);
     client->wsi = nullptr;
     return -1;
   }

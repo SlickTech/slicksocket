@@ -67,6 +67,7 @@ struct ws_request_info : public request_info {
   websocket_callback *callback = nullptr;
   ring_string_buffer sending_buffer {4096};
   std::atomic_bool shutdown {false};
+  bool disconnecte_callback_invoked {false};
 
   ws_request_info() {
     type = request_type::ws;
