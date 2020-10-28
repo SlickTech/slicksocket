@@ -1,4 +1,4 @@
-# Slicksocket
+# SlickSocket
 A lightweight cross-platform modern C++ HTTP/HTTPS and WebSocket library.
 
 ## Why another network library?
@@ -13,7 +13,7 @@ is missing a good tutorial and user guide. For a new user, it will take some tim
 figure out how to make things work. The goal of Slicksocket is to remove the hussle away by providing
 a lightweight, easy to use modern C++ library.
 
-## What make Slicksocket stands out?
+## What make SlickSocket stands out?
 * Use latest C++ 11/14 standard.
 * Cross-platform. Easy to compile and use on Windows, Linux and Mac OS X.
 * Support HTTP/HTTPS and WebSocket.
