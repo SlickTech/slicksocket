@@ -40,9 +40,11 @@ namespace net {
 
 inline void set_cpu_affinity(int32_t cpu_affinity) {
   if (cpu_affinity != -1) {
-#ifdef WIN32
+#ifdef _MSC_VER
     auto thrd = GetCurrentThread();
     SetThreadAffinityMask(thrd, 1LL << (cpu_affinity % std::thread::hardware_concurrency()));
+#elif __APPLE__
+
 #else
     cpu_set_t cpus;
     CPU_ZERO(&cpus);

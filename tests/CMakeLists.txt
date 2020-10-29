@@ -1,5 +1,7 @@
-cmake_minimum_required(VERSION 2.8.9)
-project(tests)
+cmake_minimum_required(VERSION 3.12)
+project(tests
+        VERSION 1.0.0
+        LANGUAGES CXX)
 
 configure_file(cert.pem ${CMAKE_BINARY_DIR}/bin/cert.pem COPYONLY)
 
@@ -9,9 +11,4 @@ link_directories(${CMAKE_BINARY_DIR}/lib)
 
 add_executable(tests http_client_tests.cpp)
 set_target_properties(tests PROPERTIES LINKER_LANGUAGE CXX)
-
-if (WIN32)
-    target_link_libraries(tests slicksocket_static websockets_static openssl libssl libcrypto ws2_32)
-else()
-    target_link_libraries(tests slicksocket ssl crypto pthread)
-endif()
+target_link_libraries(tests PRIVATE ${SLICKSOCKET_LINK_LIBRARIES})
