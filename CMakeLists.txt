@@ -22,7 +22,7 @@ include(cmake/cpm.cmake)
 CPMAddPackage(
         NAME libwebsockets
         GITHUB_REPOSITORY warmcat/libwebsockets
-        GIT_TAG v4.1.4
+        GIT_TAG v4.1-stable
         OPTIONS
             "LWS_WITHOUT_SERVER On"
             "LWS_WITHOUT_TEST_CLIENT On"
