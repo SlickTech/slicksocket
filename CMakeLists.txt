@@ -62,7 +62,7 @@ if (WIN32)
     include(GenerateExportHeader)
     generate_export_header(slicksocket_shared)
 
-    add_custom_command(TARGET slicksocket POST_BUILD
+    add_custom_command(TARGET slicksocket_shared POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy
             "${libwebsockets_BINARY_DIR}/bin/websockets.dll"
             "${CMAKE_BINARY_DIR}/bin/")
