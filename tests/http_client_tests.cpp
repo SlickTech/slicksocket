@@ -56,10 +56,10 @@ TEST_CASE("HTTP GET") {
 
 TEST_CASE("HTTP POST") {
   http_client client("https://postman-echo.com", "cert.pem");
-  auto request = std::make_shared<http_request>("/post");
+  auto request = std::make_shared<http_request>();
   request->add_header("Authorization", "test");
   request->add_body("{\"name\":\"Tom\"}", "application/json");
-  auto response = client.request("POST", std::move(request));
+  auto response = client.request("POST", "/post", std::move(request));
   printf("%d %s\n", response.status, response.response_text.c_str());
   REQUIRE((response.status == 200 && response.response_text.find("\"authorization\":\"test\"") != std::string::npos
       && response.response_text.find("\"json\":{\"name\":\"Tom\"}") != std::string::npos));
@@ -67,12 +67,14 @@ TEST_CASE("HTTP POST") {
 
 TEST_CASE("HTTP PUT") {
   http_client client("https://postman-echo.com", "cert.pem");
-  auto request = std::make_shared<http_request>("/put");
+  auto request = std::make_shared<http_request>();
   request->add_header("Authorization", "test");
   request->add_body("{\"id\":12345}", "application/json");
-  auto response = client.request("PUT", std::move(request));
+  auto response = client.request("PUT", "/put", std::move(request));
   REQUIRE((response.status == 200 && response.response_text.find("\"authorization\":\"test\"") != std::string::npos
       && response.response_text.find("\"json\":{\"id\":12345}") != std::string::npos));
 }
+
+
 
 }

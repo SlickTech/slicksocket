@@ -1,7 +1,7 @@
 /***
  *  MIT License
  *
- *  Copyright (c) 2018-2019 SlickTech <support@slicktech.org>
+ *  Copyright (c) 2018-2021 SlickTech <support@slicktech.org>
  *
  *  Permission is hereby granted, free of charge, to any person obtaining a copy
  *  of this software and associated documentation files (the "Software"), to deal
@@ -33,7 +33,7 @@ http_client::http_client(std::string address,
                          std::string origin,
                          std::string ca_file_path,
                          int32_t cpu_affinity,
-                         bool use_global_thread)
+                         bool use_global_thread) noexcept
   : service_(use_global_thread
       ? socket_service::global(ca_file_path, cpu_affinity) : new socket_service(std::move(ca_file_path), cpu_affinity))
   , address_(std::move(address))
@@ -58,7 +58,7 @@ http_client::http_client(std::string address,
   }
 }
 
-http_client::~http_client() {
+http_client::~http_client() noexcept {
   if (service_ && !service_->is_global()) {
     delete service_;
     service_ = nullptr;

@@ -35,7 +35,7 @@ namespace net {
 
 class socket_service;
 
-class websocket_callback;
+class client_callback_t;
 struct http_request;
 struct http_response;
 
@@ -64,7 +64,7 @@ struct http_request_info : public request_info {
 };
 
 struct ws_request_info : public request_info {
-  websocket_callback *callback = nullptr;
+  client_callback_t *callback = nullptr;
   ring_string_buffer sending_buffer {4096};
   std::atomic_bool shutdown {false};
   bool disconnecte_callback_invoked {false};
@@ -82,7 +82,7 @@ class socket_service {
   std::atomic_bool run_{true};
   object_pool<http_request_info> http_request_pool_;
   object_pool<ws_request_info> ws_request_pool_;
-  ring_buffer<request_info*> queue_;
+  ring_buffer<request_info*> request_queue_;
   std::string ca_file_path_;
   bool is_global_ = false;
 
@@ -129,7 +129,7 @@ class socket_service {
   }
 
   void request(request_info* req) {
-    auto slot = queue_.reserve();
+    auto slot = request_queue_.reserve();
     slot[0] = req;
     slot.publish();
   }

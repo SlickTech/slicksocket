@@ -1,7 +1,7 @@
 /***
  *  MIT License
  *
- *  Copyright (c) 2019 SlickTech <support@slicktech.org>
+ *  Copyright (c) 2019-2021 SlickTech <support@slicktech.org>
  *
  *  Permission is hereby granted, free of charge, to any person obtaining a copy
  *  of this software and associated documentation files (the "Software"), to deal
@@ -31,46 +31,12 @@
 namespace slick {
 namespace net {
 
-/**
- * websocket callback
- */
-class websocket_callback {
- public:
-  virtual ~websocket_callback() = default;
-
-  /**
-   * on_connected invoked when connection established
-   */
-  virtual void on_connected() = 0;
-
-  /**
-   * on_disconnected invoked when connection closed
-   */
-  virtual void on_disconnected() = 0;
-
-  /**
-   * on_error invoked when error occurred
-   *
-   * @param msg     Error message. Might be empty.
-   * @param len     Error message length
-   */
-  virtual void on_error(const char* msg, size_t len) = 0;
-
-  /**
-   * on_data invoked when data received
-   *
-   * @param data        Data string
-   * @param len         Current data length
-   * @param remaining   How many data remains
-   */
-  virtual void on_data(const char* data, size_t len, size_t remaining) = 0;
-};
-
 struct ws_request_info;
 class socket_service;
+class client_callback_t;
 
 class websocket_client {
-  websocket_callback *callback_;
+  client_callback_t *callback_;
   ws_request_info* request_ = nullptr;
   socket_service* service_ = nullptr;
   std::string address_;
@@ -79,7 +45,7 @@ class websocket_client {
   int16_t port_ = -1;
 
  public:
-  websocket_client(websocket_callback *callback,
+  websocket_client(client_callback_t *callback,
                    std::string address,
                    std::string origin = "",
                    std::string path = "/",
@@ -87,18 +53,18 @@ class websocket_client {
                    int32_t cpu_affinity = -1,
                    bool use_global_service = false);
 
-  virtual ~websocket_client();
+  virtual ~websocket_client() noexcept;
 
   /**
    * Connect to WebSocket server
    * @return False if error occurred. Otherwise True.
    */
-  bool connect();
+  bool connect() noexcept;
 
   /**
    * Stop WebSocket Client
    */
-  void stop();
+  void stop() noexcept;
 
   /**
    * Send message to WebSocket server
@@ -106,10 +72,7 @@ class websocket_client {
    * @param len     The length of the message
    * @return        True on success. Otherwise False.
    */
-  bool send(const char* msg, size_t len);
-
- private:
-//  std::shared_ptr<ws_request_info> info_;
+  bool send(const char* msg, size_t len) noexcept;
 };
 
 } // namespace net

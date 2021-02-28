@@ -1,9 +1,9 @@
 #include "socket_service.h"
 #include <slicksocket/http_client.h>
-#include <slicksocket/websocket_client.h>
 #include "utils.h"
 #include <unordered_set>
-#include <mutex>
+
+#define QUEUE_SIZE 65536
 
 using namespace slick::net;
 
@@ -45,9 +45,9 @@ destroyer s_destroyer;
 }
 
 socket_service::socket_service(std::string ca_file_path, int32_t cpu_affinity, bool is_global)
-    : http_request_pool_(65536),
-      ws_request_pool_(8192),
-      queue_(65536),
+    : http_request_pool_(QUEUE_SIZE),
+      ws_request_pool_(QUEUE_SIZE),
+      request_queue_(QUEUE_SIZE),
       ca_file_path_(std::move(ca_file_path)),
       is_global_(is_global) {
   lws_context_creation_info context_info;
@@ -84,9 +84,9 @@ void socket_service::serve(int32_t cpu_affinity) {
   uint64_t sn = 0;
   set_cpu_affinity(cpu_affinity);
   while (run_.load(std::memory_order_relaxed)) {
-    sn = queue_.available();
+    sn = request_queue_.available();
     if (cursor_ != sn) {
-      auto req = queue_[cursor_++];
+      auto req = request_queue_[cursor_++];
       auto &cci = req->cci;
       cci.context = context_;
       requests.emplace(req);

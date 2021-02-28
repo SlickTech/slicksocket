@@ -23,15 +23,14 @@
  */
 
 #include "slicksocket/websocket_client.h"
-#include "utils.h"
+#include "slicksocket/callback.h"
 #include <atomic>
-#include <unordered_set>
 #include <array>
 #include "socket_service.h"
 
 using namespace slick::net;
 
-websocket_client::websocket_client(websocket_callback *callback,
+websocket_client::websocket_client(client_callback_t *callback,
                                    std::string address,
                                    std::string origin,
                                    std::string path,
@@ -62,7 +61,7 @@ websocket_client::websocket_client(websocket_callback *callback,
   }
 }
 
-websocket_client::~websocket_client() {
+websocket_client::~websocket_client() noexcept {
   if (service_ && !service_->is_global()) {
     delete service_;
     service_ = nullptr;
@@ -70,7 +69,7 @@ websocket_client::~websocket_client() {
   stop();
 }
 
-bool websocket_client::connect() {
+bool websocket_client::connect() noexcept {
   if (request_) {
     request_->shutdown.store(true, std::memory_order_relaxed);
   }
@@ -103,14 +102,14 @@ bool websocket_client::connect() {
   return true;
 }
 
-void websocket_client::stop() {
+void websocket_client::stop() noexcept {
   if (request_) {
     request_->shutdown.store(true, std::memory_order_relaxed);
     request_ = nullptr;
   }
 }
 
-bool websocket_client::send(const char *msg, size_t len) {
+bool websocket_client::send(const char *msg, size_t len) noexcept {
   if (!request_ || !request_->wsi) {
     return false;
   }

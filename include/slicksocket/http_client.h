@@ -1,7 +1,7 @@
 /***
  *  MIT License
  *
- *  Copyright (c) 2018-2019 SlickTech <support@slicktech.org>
+ *  Copyright (c) 2018-2021 SlickTech <support@slicktech.org>
  *
  *  Permission is hereby granted, free of charge, to any person obtaining a copy
  *  of this software and associated documentation files (the "Software"), to deal
@@ -100,7 +100,7 @@ struct http_response {
   std::string content_type;
   std::string response_text;
 
-  http_response(int32_t stat, std::string &&type, std::string &&response)
+  http_response(int32_t stat, std::string &&type, std::string &&response) noexcept
       : status(stat), content_type(std::move(type)), response_text(std::move(response)) {}
 };
 
@@ -133,9 +133,9 @@ class http_client {
               std::string origin = "",
               std::string ca_file_path = "",
               int32_t cpu_affinity = -1,
-              bool use_global_thread = false);
+              bool use_global_thread = false) noexcept;
 
-  virtual ~http_client();
+  virtual ~http_client() noexcept;
 
   // Synchronous Requests
 
