@@ -66,7 +66,8 @@ http_client::~http_client() noexcept {
 }
 
 http_response http_client::request(const char* method, std::string path, const std::shared_ptr<http_request>& request) {
-  auto req = service_->get_http_request();
+//  auto req = service_->get_http_request();
+  auto req = service_->get_request_info(request_type::http);
   if (!req) {
     return http_response(500, "", "Failed to create lws_context");
   }
@@ -89,17 +90,18 @@ http_response http_client::request(const char* method, std::string path, const s
     req->cci.ssl_connection = LCCSCF_USE_SSL;
   }
 
-  req->request = request;
-  req->callback = nullptr;
+  auto& http_info = req->http_info;
+  http_info.request = request;
+  http_info.callback = nullptr;
   service_->request(req);
-  while (!req->completed.load(std::memory_order_relaxed));
-  http_response response(req->status, req->content_type, req->response.str());
+  while (!http_info.completed.load(std::memory_order_relaxed));
+  http_response response(http_info.status, http_info.content_type, http_info.response.str());
   service_->release_request(req);
   return response;
 }
 
 void http_client::request(const char* method, std::string path, AsyncCallback&& callback) {
-  auto req = service_->get_http_request();
+  auto req = service_->get_request_info(request_type::http);
   if (!req) {
     callback(http_response(500, "", "Failed to create lws_context"));
     return;
@@ -122,8 +124,9 @@ void http_client::request(const char* method, std::string path, AsyncCallback&& 
     req->cci.ssl_connection = LCCSCF_USE_SSL;
   }
 
-  req->request = nullptr;
-  req->callback = callback;
+  auto& http_info = req->http_info;
+  http_info.request = nullptr;
+  http_info.callback = callback;
   service_->request(req);
 }
 
@@ -131,12 +134,11 @@ void http_client::request(const char *method,
                           std::string path,
                           const std::shared_ptr<http_request>& request,
                           AsyncCallback &&callback) {
-  auto req = service_->get_http_request();
+  auto req = service_->get_request_info(request_type::http);
   if (!req) {
     callback(http_response(500, "", "Failed to create lws_context"));
     return;
   }
-  req->type = request_type::http;
   req->path = std::move(path);
   memset(&req->cci, 0, sizeof(req->cci));
   req->cci.port = port_;
@@ -154,42 +156,47 @@ void http_client::request(const char *method,
     req->cci.ssl_connection = LCCSCF_USE_SSL;
   }
 
-  req->request = request;
-  req->callback = callback;
+  auto& http_info = req->http_info;
+  http_info.request = request;
+  http_info.callback = callback;
   service_->request(req);
 }
 
 int http_callback(struct lws *wsi, enum lws_callback_reasons reason, void* user, void* in, size_t len) {
-  auto req = (http_request_info*)lws_wsi_user(wsi);
+  auto req = (request_info*)lws_wsi_user(wsi);
+  if (!req) {
+    return lws_callback_http_dummy(wsi, reason, user, in, len);
+  }
+  auto& http_info = req->http_info;
 
   switch (reason) {
     case LWS_CALLBACK_CLIENT_CONNECTION_ERROR:
       lwsl_user("%s:%d Connection error occurred. ", req->cci.address, req->cci.port);
-      req->response << req->path << " error occurred. ";
+      http_info.response << req->path << " error occurred. ";
       if (in && len) {
-        req->response << std::string((char*)in, len);
+        http_info.response << std::string((char*)in, len);
         lwsl_user("%s", (const char*)in);
       }
       lwsl_user("\n");
       req->wsi = nullptr;
-      req->completed.store(true, std::memory_order_release);
+      http_info.completed.store(true, std::memory_order_release);
       break;
 
     case LWS_CALLBACK_CLIENT_APPEND_HANDSHAKE_HEADER: {
       unsigned char **p = (unsigned char **) in, *end = (*p) + len - 1;
       if (lws_add_http_header_by_token(wsi, WSI_TOKEN_HTTP_USER_AGENT, (unsigned char*)"libwebsocket", 12, p, end)) {
         req->wsi = nullptr;
-        req->response << req->path << " failed to add User-Agent header";
-        req->completed.store(true, std::memory_order_release);
+        http_info.response << req->path << " failed to add User-Agent header";
+        http_info.completed.store(true, std::memory_order_release);
         return -1;
       }
 
-      if (!req->request) {
+      if (!http_info.request) {
         break;
       }
 
-      if (!req->request->headers().empty()) {
-        for (auto &kvp : req->request->headers()) {
+      if (!http_info.request->headers().empty()) {
+        for (auto &kvp : http_info.request->headers()) {
           if (lws_add_http_header_by_name(wsi,
                                           (unsigned char *) kvp.first.c_str(),
                                           (unsigned char *) kvp.second.c_str(),
@@ -197,14 +204,14 @@ int http_callback(struct lws *wsi, enum lws_callback_reasons reason, void* user,
                                           p,
                                           end)) {
             req->wsi = nullptr;
-            req->response << req->path << " failed to add header " << kvp.first << ": " << kvp.second;
-            req->completed.store(true, std::memory_order_release);
+            http_info.response << req->path << " failed to add header " << kvp.first << ": " << kvp.second;
+            http_info.completed.store(true, std::memory_order_release);
             return -1;
           }
         }
       }
 
-      const auto& content_type = req->request->content_type();
+      const auto& content_type = http_info.request->content_type();
       if (!content_type.empty()) {
         if (lws_add_http_header_by_token(wsi,
                                          WSI_TOKEN_HTTP_CONTENT_TYPE,
@@ -213,14 +220,14 @@ int http_callback(struct lws *wsi, enum lws_callback_reasons reason, void* user,
                                          p,
                                          end)) {
           req->wsi = nullptr;
-          req->response << req->path << " failed to add header Content-Type:" << content_type;
-          req->completed.store(true, std::memory_order_release);
+          http_info.response << req->path << " failed to add header Content-Type:" << content_type;
+          http_info.completed.store(true, std::memory_order_release);
           return -1;
         }
       }
 
 
-      const auto& body = req->request->body();
+      const auto& body = http_info.request->body();
       if (!body.empty()) {
         std::string sz = std::to_string(body.size());
         if (lws_add_http_header_by_token(wsi,
@@ -230,8 +237,8 @@ int http_callback(struct lws *wsi, enum lws_callback_reasons reason, void* user,
                                          p,
                                          end)) {
           req->wsi = nullptr;
-          req->response << req->path << " failed to add header Content-Length:" << sz;
-          req->completed.store(true, std::memory_order_release);
+          http_info.response << req->path << " failed to add header Content-Length:" << sz;
+          http_info.completed.store(true, std::memory_order_release);
           return -1;
         }
         lws_client_http_body_pending(wsi, 1);
@@ -241,18 +248,18 @@ int http_callback(struct lws *wsi, enum lws_callback_reasons reason, void* user,
     }
 
     case LWS_CALLBACK_CLIENT_HTTP_WRITEABLE: {
-      auto p = (unsigned char*)&req->buffer[LWS_PRE];
-	  if (!req->request) {
+      auto p = (unsigned char*)&http_info.buffer[LWS_PRE];
+	  if (!http_info.request) {
 		  break;
 	  }
 
-      const auto& body = req->request->body();
+      const auto& body = http_info.request->body();
       auto sz = body.size() + 1;
 
-      if (sz > sizeof(req->buffer) - LWS_PRE) {
+      if (sz > sizeof(http_info.buffer) - LWS_PRE) {
         req->wsi = nullptr;
-        req->response << req->path << " body exceeds buffer size";
-        req->completed.store(true, std::memory_order_release);
+        http_info.response << req->path << " body exceeds buffer size";
+        http_info.completed.store(true, std::memory_order_release);
         return -1;
       }
 
@@ -261,45 +268,45 @@ int http_callback(struct lws *wsi, enum lws_callback_reasons reason, void* user,
 
       if (lws_write(wsi, p, n, LWS_WRITE_HTTP_FINAL) != n) {
         req->wsi = nullptr;
-        req->response << req->path << " failed to write body";
-        req->completed.store(true, std::memory_order_release);
+        http_info.response << req->path << " failed to write body";
+        http_info.completed.store(true, std::memory_order_release);
         return -1;
       }
       break;
     }
 
     case LWS_CALLBACK_ESTABLISHED_CLIENT_HTTP: {
-      req->status = lws_http_client_http_response(wsi);
-      assert(sizeof(req->content_type) > (size_t)lws_hdr_total_length(wsi, WSI_TOKEN_HTTP_CONTENT_TYPE));
-      lws_hdr_copy(wsi, req->content_type, sizeof(req->content_type), WSI_TOKEN_HTTP_CONTENT_TYPE);
-      req->response.clear();
+      http_info.status = lws_http_client_http_response(wsi);
+      assert(sizeof(http_info.content_type) > (size_t)lws_hdr_total_length(wsi, WSI_TOKEN_HTTP_CONTENT_TYPE));
+      lws_hdr_copy(wsi, http_info.content_type, sizeof(http_info.content_type), WSI_TOKEN_HTTP_CONTENT_TYPE);
+      http_info.response.clear();
       break;
     }
 
     case LWS_CALLBACK_RECEIVE_CLIENT_HTTP: {
-      char *px = req->buffer + LWS_PRE;
-      auto buffer_len = req->buffer_len;
+      char *px = http_info.buffer + LWS_PRE;
+      auto buffer_len = http_info.buffer_len;
       if (lws_http_client_read(wsi, &px, &buffer_len) < 0) {
-        req->completed.store(true, std::memory_order_relaxed);
+        http_info.completed.store(true, std::memory_order_relaxed);
         return -1;
       }
       return 0;
     }
 
     case LWS_CALLBACK_RECEIVE_CLIENT_HTTP_READ:
-      req->response << std::string((char*)in, len);
+      http_info.response << std::string((char*)in, len);
       return 0;
 
     case LWS_CALLBACK_COMPLETED_CLIENT_HTTP:
     case LWS_CALLBACK_CLOSED_CLIENT_HTTP:
       req->wsi = nullptr;
-      req->completed.store(true, std::memory_order_release);
+      http_info.completed.store(true, std::memory_order_release);
       lws_cancel_service(lws_get_context(wsi));
       break;
 
     case LWS_CALLBACK_WSI_DESTROY:
       req->wsi = nullptr;
-      req->completed.store(true, std::memory_order_release);
+      http_info.completed.store(true, std::memory_order_release);
       break;
 
     default:

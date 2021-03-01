@@ -26,30 +26,22 @@ a lightweight, easy to use modern C++ library.
 [Tutorial](https://github.com/SlickTech/slicksocket#tutorial)<br />
 [Caveats](https://github.com/SlickTech/slicksocket#caveats)
 
-## Build Slicksocket
-### 1. Install CMake
-Install CMake 2.8 or greater from https://cmake.org/download/
-
-### 2.Install OpenSSL
-On Linux:
+## Build SlickSocket
+### 1. Install vcpkg
 ```
-#### on Ubutu ####
-sudo apt-get install libssl-dev
+git clone https://github.com/microsoft/vcpkg
 
-#### on Centos ####
-sudo yum install openssl
+On Windows run:
+.\vcpkg\bootstrap-vcpkg.bat
+
+On Mac or Linux run:
+./vcpkg/boostrap-vcpkg.sh
 ```
-Or follow [this side](http://www.technologyskill.ga/install-openssl-manually-on-linux/?i=1) 
-to install OpenSSL manually from source.
+For more information about vcpkg, please visit https://github.com/microsoft/vcpkg
 
-On Windows:<br />
-Download and install OpenSSL binaries from https://wiki.openssl.org/index.php/Binaries<br />
-**Note: Be sure add OPENSSL_CONFIG environment variable and set it to <install_path>\bin\openssl.cfg**
-
-On Mac OS X:<br />
-Mac should have OpenSSL installed by default. To install latest version, simple do:
+### 2. Install Libwebsockets
 ```
-brew install openssl
+./vcpkg/vcpkg install libwebsockets
 ```
 
 ### 3. Get the project and dependencies
@@ -57,14 +49,13 @@ brew install openssl
 ```
 git clone https://github.com/SlickTech/slicksocket.git
 cd slicksocket
-git submodule update --init
 ```
 
 ### 4. Build the project
 ```
 mkdir build
 cd build
-cmake ..
+cmake .. -DCMAKE_TOOLCHAIN_FILE=[path to vcpkg]/scripts/buildsystems/vcpkg.cmake
 cmake --build . --target slicksocket
 ```
 **NOTE:** By default, it makes a release build. To make debug build, use: <br />

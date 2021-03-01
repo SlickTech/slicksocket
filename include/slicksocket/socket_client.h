@@ -1,7 +1,7 @@
 /***
  *  MIT License
  *
- *  Copyright (c) 2019-2021 SlickTech <support@slicktech.org>
+ *  Copyright (c) 2021 SlickTech <support@slicktech.org>
  *
  *  Permission is hereby granted, free of charge, to any person obtaining a copy
  *  of this software and associated documentation files (the "Software"), to deal
@@ -26,44 +26,39 @@
 
 #include <cstdint>
 #include <string>
-#include <memory>
+#include <functional>
 
 namespace slick {
 namespace net {
 
-struct request_info;
-class socket_service;
 class client_callback_t;
+class socket_service;
+struct request_info;
 
-class websocket_client {
-  client_callback_t *callback_;
+class socket_client {
+  client_callback_t* callback_;
+  socket_service* service_;
   request_info* request_ = nullptr;
-  socket_service* service_ = nullptr;
+  uint32_t port_;
   std::string address_;
-  std::string origin_;
-  std::string path_;
-  int16_t port_ = -1;
 
  public:
-  websocket_client(client_callback_t *callback,
-                   std::string address,
-                   std::string origin = "",
-                   std::string path = "/",
-                   std::string ca_file_path = "",
-                   int32_t cpu_affinity = -1,
-                   bool use_global_service = false);
-
-  virtual ~websocket_client() noexcept;
+  socket_client(client_callback_t *callback,
+                std::string address,
+                uint32_t port,
+                int32_t cpu_affinity = -1,
+                bool use_global_thread = false);
+  virtual ~socket_client();
 
   /**
    * Connect to WebSocket server
    * @return False if error occurred. Otherwise True.
    */
-  bool connect() noexcept;
+  bool connect();
 
   /**
-   * Stop WebSocket Client
-   */
+  * Stop socket_client
+  */
   void stop() noexcept;
 
   /**
@@ -72,8 +67,8 @@ class websocket_client {
    * @param len     The length of the message
    * @return        True on success. Otherwise False.
    */
-  bool send(const char* msg, size_t len) noexcept;
+  bool send(char* msg, size_t len);
 };
 
-} // namespace net
-} // namespace slick
+}
+}

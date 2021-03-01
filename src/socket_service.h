@@ -42,16 +42,10 @@ struct http_response;
 enum class request_type {
   http,
   ws,
+  socket,
 };
 
-struct request_info {
-  lws *wsi = nullptr;
-  request_type type = request_type::http;
-  std::string path;
-  lws_client_connect_info cci;
-};
-
-struct http_request_info : public request_info {
+struct http_info {
   uint32_t status = 0;
   std::shared_ptr<http_request> request;
   std::function<void(http_response)> callback = nullptr;
@@ -63,16 +57,58 @@ struct http_request_info : public request_info {
   std::atomic_bool completed {false};
 };
 
-struct ws_request_info : public request_info {
+struct socket_info {
   client_callback_t *callback = nullptr;
-  ring_string_buffer sending_buffer {4096};
+  ring_string_buffer sending_buffer {8192};
   std::atomic_bool shutdown {false};
   bool disconnecte_callback_invoked {false};
 
-  ws_request_info() {
-    type = request_type::ws;
-  }
+  socket_info() = default;
+  socket_info(client_callback_t* cb) : callback(cb) {}
 };
+
+struct request_info {
+  lws *wsi = nullptr;
+  request_type type;
+  std::string path;
+  lws_client_connect_info cci;
+  struct http_info http_info;
+  struct socket_info socket_info;
+};
+
+//struct http_request_info : public request_info {
+//  uint32_t status = 0;
+//  std::shared_ptr<http_request> request;
+//  std::function<void(http_response)> callback = nullptr;
+//  std::stringstream response;
+//  char content_type[512];
+//  char buffer[2048 + LWS_PRE];
+//  char *px = buffer + LWS_PRE;
+//  int buffer_len = sizeof(buffer) - LWS_PRE;
+//  std::atomic_bool completed {false};
+//};
+
+//struct ws_request_info : public request_info {
+//  client_callback_t *callback = nullptr;
+//  ring_string_buffer sending_buffer {8192};
+//  std::atomic_bool shutdown {false};
+//  bool disconnecte_callback_invoked {false};
+//
+//  ws_request_info() {
+//    type = request_type::ws;
+//  }
+//};
+
+//struct socket_request_info : public request_info {
+//  client_callback_t *callback = nullptr;
+//  ring_string_buffer sending_buffer {8192};
+//  std::atomic_bool shutdown {false};
+//  bool disconnecte_callback_invoked {false};
+//
+//  socket_request_info() {
+//    type = request_type::socket;
+//  }
+//};
 
 class socket_service {
 
@@ -80,8 +116,10 @@ class socket_service {
   lws_context *context_ = nullptr;
   uint64_t cursor_ = 0;
   std::atomic_bool run_{true};
-  object_pool<http_request_info> http_request_pool_;
-  object_pool<ws_request_info> ws_request_pool_;
+  object_pool<request_info> request_pool_;
+//  object_pool<http_request_info> http_request_pool_;
+//  object_pool<ws_request_info> ws_request_pool_;
+//  object_pool<socket_request_info> socket_request_pool_;
   ring_buffer<request_info*> request_queue_;
   std::string ca_file_path_;
   bool is_global_ = false;
@@ -106,27 +144,53 @@ class socket_service {
 
   bool is_global() const noexcept { return is_global_; };
 
-  http_request_info* get_http_request() {
+  request_info* get_request_info(request_type type) {
     if (!context_) {
       return nullptr;
     }
-    return http_request_pool_.get_obj();
-  }
-
-  ws_request_info* get_ws_request() {
-    if (!context_) {
-      return nullptr;
+    auto obj = request_pool_.get_obj();
+    if (obj) {
+      obj->type = type;
     }
-    return ws_request_pool_.get_obj();
+    return obj;
   }
 
-  void release_request(http_request_info* req) {
-    http_request_pool_.release_obj(req);
+//  http_request_info* get_http_request() {
+//    if (!context_) {
+//      return nullptr;
+//    }
+//    return http_request_pool_.get_obj();
+//  }
+//
+//  ws_request_info* get_ws_request() {
+//    if (!context_) {
+//      return nullptr;
+//    }
+//    return ws_request_pool_.get_obj();
+//  }
+//
+//  socket_request_info* get_socket_request() {
+//    if (!context_) {
+//      return nullptr;
+//    }
+//    return socket_request_pool_.get_obj();
+//  }
+
+  void release_request(request_info* req) {
+    request_pool_.release_obj(req);
   }
 
-  void release_request(ws_request_info* req) {
-    ws_request_pool_.release_obj(req);
-  }
+//  void release_request(http_request_info* req) {
+//    http_request_pool_.release_obj(req);
+//  }
+//
+//  void release_request(ws_request_info* req) {
+//    ws_request_pool_.release_obj(req);
+//  }
+//
+//  void release_request(socket_request_info* req) {
+//    socket_request_pool_.release_obj(req);
+//  }
 
   void request(request_info* req) {
     auto slot = request_queue_.reserve();

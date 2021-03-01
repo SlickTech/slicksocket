@@ -63,14 +63,16 @@ class client_callback_t {
 };
 
 class socket_server_callback_t {
+
+ public:
   virtual ~socket_server_callback_t() = default;
 
-  virtual void on_client_connected() = 0;
+  virtual void on_client_connected(void* client_handle) = 0;
 
   /**
    * on_disconnected invoked when connection closed
    */
-  virtual void on_client_disconnected() = 0;
+  virtual void on_client_disconnected(void* client_handle) = 0;
 
   /**
    * on_error invoked when error occurred
@@ -78,7 +80,7 @@ class socket_server_callback_t {
    * @param msg     Error message. Might be empty.
    * @param len     Error message length
    */
-  virtual void on_error(const char* msg, size_t len) = 0;
+  virtual void on_error(void* client_handle, const char* msg, size_t len) = 0;
 
   /**
    * on_data invoked when data received
@@ -87,7 +89,7 @@ class socket_server_callback_t {
    * @param len         Current data length
    * @param remaining   How many data remains
    */
-  virtual void on_data(const char* data, size_t len, size_t remaining) = 0;
+  virtual void on_data(void* client_handle, const char* data, size_t len) = 0;
 };
 
 }

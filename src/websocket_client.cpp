@@ -71,10 +71,10 @@ websocket_client::~websocket_client() noexcept {
 
 bool websocket_client::connect() noexcept {
   if (request_) {
-    request_->shutdown.store(true, std::memory_order_relaxed);
+    request_->socket_info.shutdown.store(true, std::memory_order_relaxed);
   }
 
-  request_ = service_->get_ws_request();
+  request_ = service_->get_request_info(request_type::ws);
   if (!request_) {
     return false;
   }
@@ -95,16 +95,17 @@ bool websocket_client::connect() noexcept {
     request_->cci.ssl_connection = LCCSCF_USE_SSL;
   }
 
-  request_->callback = callback_;
-  request_->sending_buffer.reset();
-  request_->shutdown.store(false, std::memory_order_relaxed);
+  auto& socket_info = request_->socket_info;
+  socket_info.callback = callback_;
+  socket_info.sending_buffer.reset();
+  socket_info.shutdown.store(false, std::memory_order_relaxed);
   service_->request(request_);
   return true;
 }
 
 void websocket_client::stop() noexcept {
   if (request_) {
-    request_->shutdown.store(true, std::memory_order_relaxed);
+    request_->socket_info.shutdown.store(true, std::memory_order_relaxed);
     request_ = nullptr;
   }
 }
@@ -116,12 +117,14 @@ bool websocket_client::send(const char *msg, size_t len) noexcept {
 
   static std::array<char, LWS_PRE> header{'0'};
 
+  auto& socket_info = request_->socket_info;
+
   // reserve space for LWS header
-  if (!request_->sending_buffer.write(&header[0], LWS_PRE, len)) {
+  if (!socket_info.sending_buffer.write(&header[0], LWS_PRE, len)) {
     return false;
   }
 
-  if (request_->sending_buffer.write(msg, len)) {
+  if (socket_info.sending_buffer.write(msg, len)) {
     lws_callback_on_writable(request_->wsi);
     return true;
   }
@@ -142,25 +145,25 @@ int ws_callback(struct lws *wsi, enum lws_callback_reasons reason, void *user, v
     return lws_callback_http_dummy(wsi, reason, user, in, len);
   }
 
-  auto client = reinterpret_cast<ws_request_info*>(req);
+  auto& client = req->socket_info;
   switch (reason) {
     case LWS_CALLBACK_CLIENT_CONNECTION_ERROR:
-      client->wsi = nullptr;
-      client->callback->on_error((const char*)in, len);
+      req->wsi = nullptr;
+      client.callback->on_error((const char*)in, len);
       break;
 
     case LWS_CALLBACK_CLIENT_ESTABLISHED:
-      client->sending_buffer.reset();
-      client->callback->on_connected();
-      client->disconnecte_callback_invoked = false;
+      client.sending_buffer.reset();
+      client.callback->on_connected();
+      client.disconnecte_callback_invoked = false;
       break;
 
     case LWS_CALLBACK_CLIENT_WRITEABLE: {
-      auto msg = client->sending_buffer.read();
+      auto msg = client.sending_buffer.read();
       if (msg.second) {
         size_t n = lws_write(wsi, (unsigned char*)msg.first + LWS_PRE, msg.second - LWS_PRE, LWS_WRITE_TEXT);
         if (n < len) {
-          client->wsi = nullptr;
+          req->wsi = nullptr;
           return -1;
         }
         lws_callback_on_writable(wsi);
@@ -170,21 +173,21 @@ int ws_callback(struct lws *wsi, enum lws_callback_reasons reason, void *user, v
 
     case LWS_CALLBACK_CLIENT_RECEIVE: {
       auto remaining = lws_remaining_packet_payload(wsi);
-      client->callback->on_data((const char*)in, len, remaining);
+      client.callback->on_data((const char*)in, len, remaining);
       break;
     }
 
     case LWS_CALLBACK_CLIENT_CLOSED:
-      client->wsi = nullptr;
-      client->callback->on_disconnected();
-      client->disconnecte_callback_invoked = true;
+      req->wsi = nullptr;
+      client.callback->on_disconnected();
+      client.disconnecte_callback_invoked = true;
       break;
 
     case LWS_CALLBACK_WSI_DESTROY:
-      client->wsi = nullptr;
-      if (!client->disconnecte_callback_invoked) {
-        client->callback->on_disconnected();
-        client->disconnecte_callback_invoked = true;
+      req->wsi = nullptr;
+      if (!client.disconnecte_callback_invoked) {
+        client.callback->on_disconnected();
+        client.disconnecte_callback_invoked = true;
       }
       break;
 
@@ -192,9 +195,9 @@ int ws_callback(struct lws *wsi, enum lws_callback_reasons reason, void *user, v
       return lws_callback_http_dummy(wsi, reason, user, in, len);
   }
 
-  if (client->wsi && client->shutdown.load(std::memory_order_relaxed)) {
-    lwsl_user("Shutting down %s:%d%s\n", client->cci.address, client->cci.port, client->cci.path);
-    client->wsi = nullptr;
+  if (req->wsi && client.shutdown.load(std::memory_order_relaxed)) {
+    lwsl_user("Shutting down %s:%d%s\n", req->cci.address, req->cci.port, req->cci.path);
+    req->wsi = nullptr;
     return -1;
   }
   return lws_callback_http_dummy(wsi, reason, user, in, len);

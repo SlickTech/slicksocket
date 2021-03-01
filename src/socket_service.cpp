@@ -9,12 +9,14 @@ using namespace slick::net;
 
 extern int http_callback(struct lws *wsi, enum lws_callback_reasons reason, void* user, void* in, size_t len);
 extern int ws_callback(struct lws *wsi, enum lws_callback_reasons reason, void *user, void *in, size_t len);
+extern int raw_socket_callback(struct lws *wsi, enum lws_callback_reasons reason, void *user, void *in, size_t len);
 
 namespace {
 
 const struct lws_protocols s_protocols[] = {
     {"ws", ws_callback, 0, 0},
     {"http", http_callback, 0, 0},
+    {"raw_socket", raw_socket_callback, 0, 0},
     {nullptr, nullptr, 0, 0}
 };
 
@@ -45,11 +47,10 @@ destroyer s_destroyer;
 }
 
 socket_service::socket_service(std::string ca_file_path, int32_t cpu_affinity, bool is_global)
-    : http_request_pool_(QUEUE_SIZE),
-      ws_request_pool_(QUEUE_SIZE),
-      request_queue_(QUEUE_SIZE),
-      ca_file_path_(std::move(ca_file_path)),
-      is_global_(is_global) {
+    : request_pool_(QUEUE_SIZE)
+    , request_queue_(QUEUE_SIZE)
+    , ca_file_path_(std::move(ca_file_path))
+    , is_global_(is_global) {
   lws_context_creation_info context_info;
   memset(&context_info, 0, sizeof(context_info));
 
@@ -90,8 +91,8 @@ void socket_service::serve(int32_t cpu_affinity) {
       auto &cci = req->cci;
       cci.context = context_;
       requests.emplace(req);
-      lwsl_user("Connecting to %s:%d%s\n", cci.address, cci.port, cci.path);
-      lws_client_connect_via_info(&cci);
+        lwsl_user("Connecting to %s:%d%s\n", cci.address, cci.port, cci.path);
+        lws_client_connect_via_info(&cci);
     }
 
     if (!requests.empty()) {
@@ -102,18 +103,27 @@ void socket_service::serve(int32_t cpu_affinity) {
       auto req = *it;
       if (!req->wsi) {
         if (req->type == request_type::http) {
-          auto http_req = (http_request_info*)req;
-          http_req->completed.store(true, std::memory_order_release);
-          if (http_req->callback) {
-            http_req->callback(http_response(http_req->status, http_req->content_type, http_req->response.str()));
-            http_request_pool_.release_obj(http_req);
+          auto& http_info = req->http_info;
+          http_info.completed.store(true, std::memory_order_release);
+          if (http_info.callback) {
+            http_info.callback(http_response(http_info.status, http_info.content_type, http_info.response.str()));
+            request_pool_.release_obj(req);
           }
           it = requests.erase(it);
         } else if (req->type == request_type::ws) {
-          auto ws_req = (ws_request_info*)req;
-          if (ws_req->shutdown.load(std::memory_order_relaxed)) {
+          auto& ws_info = req->socket_info;
+          if (ws_info.shutdown.load(std::memory_order_relaxed)) {
             // client shutdown
-            ws_request_pool_.release_obj(ws_req);
+            request_pool_.release_obj(req);
+            it = requests.erase(it);
+          } else {
+            ++it;
+          }
+        } else if (req->type == request_type::socket) {
+          auto& socket_req = req->socket_info;
+          if (socket_req.shutdown.load(std::memory_order_relaxed)) {
+            // client shutdown
+            request_pool_.release_obj(req);
             it = requests.erase(it);
           } else {
             ++it;
