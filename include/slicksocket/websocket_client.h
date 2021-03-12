@@ -39,6 +39,7 @@ class websocket_client {
   client_callback_t *callback_;
   request_info* request_ = nullptr;
   socket_service* service_ = nullptr;
+  std::string url_;
   std::string address_;
   std::string origin_;
   std::string path_;
@@ -46,14 +47,15 @@ class websocket_client {
 
  public:
   websocket_client(client_callback_t *callback,
-                   std::string address,
+                   std::string url_,
                    std::string origin = "",
-                   std::string path = "/",
                    std::string ca_file_path = "",
                    int32_t cpu_affinity = -1,
                    bool use_global_service = false);
 
   virtual ~websocket_client() noexcept;
+  
+  const std::string& url() const noexcept { return url_; }
 
   /**
    * Connect to WebSocket server

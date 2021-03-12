@@ -94,7 +94,9 @@ http_response http_client::request(const char* method, std::string path, const s
   http_info.request = request;
   http_info.callback = nullptr;
   service_->request(req);
-  while (!http_info.completed.load(std::memory_order_relaxed));
+  while (!http_info.completed.load(std::memory_order_relaxed)) {
+      std::this_thread::yield();
+  }
   http_response response(http_info.status, http_info.content_type, http_info.response.str());
   service_->release_request(req);
   return response;

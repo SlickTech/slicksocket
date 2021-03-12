@@ -31,34 +31,54 @@
 using namespace slick::net;
 
 websocket_client::websocket_client(client_callback_t *callback,
-                                   std::string address,
+                                   std::string url,
                                    std::string origin,
-                                   std::string path,
                                    std::string ca_file_path,
                                    int32_t cpu_affinity,
                                    bool use_global_service)
   : callback_(callback)
   , service_(use_global_service
       ? socket_service::global(ca_file_path, cpu_affinity) : new socket_service(std::move(ca_file_path), cpu_affinity))
-  , address_(std::move(address))
-  , origin_(std::move(origin))
-  , path_(std::move(path)) {
-  auto pos = address.find(':');
+  , url_(std::move(url))
+  , origin_(std::move(origin)) {
+
+  std::string protoco("wss");
+  auto pos = url_.find("://");
+  if (pos == std::string::npos) {
+      pos = url_.find("/");
+      if (pos == std::string::npos) {
+          address_ = url_;
+          path_ = "/";
+      }
+      else {
+          address_ = url_.substr(0, pos);
+          path_ = url_.substr(pos);
+      }
+  }
+  else {
+      protoco = url_.substr(0, pos);
+      auto address_begin = pos + 3;
+      auto pos1 = url_.find("/", address_begin);
+      if (pos1 == std::string::npos) {
+          address_ = url_.substr(address_begin);
+          path_ = "/";
+      }
+      else {
+          address_ = url_.substr(address_begin, pos1 - address_begin);
+          path_ = url_.substr(pos1);
+      }
+  }
+  
+  pos = address_.find(':');
   if (pos != 3 && pos != 4 && pos != std::string::npos) {
-    port_ = std::stoi(address.substr(pos + 1));
+    port_ = std::stoi(address_.substr(pos + 1));
+    address_ = address_.substr(0, pos);
   }
 
-  if (address_.find("wss://") != std::string::npos) {
-    address_ = (pos != std::string::npos) ? address_.substr(6, pos - 6) : address_.substr(6);
-    if (port_ == -1) {
-      port_ = 443;
-    }
-  } else if (address_.find("ws://") != std::string::npos) {
-    address_ = (pos != std::string::npos) ? address_.substr(5, pos - 5) : address_.substr(5);
-    if (port_ == -1) {
-      port_ = 80;
-    }
+  if (port_ == -1) {
+      port_ = (protoco == "ws") ? 80 : 443;
   }
+  
 }
 
 websocket_client::~websocket_client() noexcept {
@@ -106,6 +126,10 @@ bool websocket_client::connect() noexcept {
 void websocket_client::stop() noexcept {
   if (request_) {
     request_->socket_info.shutdown.store(true, std::memory_order_relaxed);
+    if (request_->wsi) {
+      lws_callback_on_writable(request_->wsi);
+    }
+    service_->wakeup();
     request_ = nullptr;
   }
 }
@@ -126,6 +150,7 @@ bool websocket_client::send(const char *msg, size_t len) noexcept {
 
   if (socket_info.sending_buffer.write(msg, len)) {
     lws_callback_on_writable(request_->wsi);
+    service_->wakeup();
     return true;
   }
   return false;
@@ -146,6 +171,13 @@ int ws_callback(struct lws *wsi, enum lws_callback_reasons reason, void *user, v
   }
 
   auto& client = req->socket_info;
+  if (client.shutdown.load(std::memory_order_relaxed)) {
+      if (req->wsi) {
+          req->wsi = nullptr;
+      }
+      return -1;
+  }
+
   switch (reason) {
     case LWS_CALLBACK_CLIENT_CONNECTION_ERROR:
       req->wsi = nullptr;
@@ -160,7 +192,7 @@ int ws_callback(struct lws *wsi, enum lws_callback_reasons reason, void *user, v
 
     case LWS_CALLBACK_CLIENT_WRITEABLE: {
       auto msg = client.sending_buffer.read();
-      if (msg.second) {
+      if (msg.first && msg.second) {
         size_t n = lws_write(wsi, (unsigned char*)msg.first + LWS_PRE, msg.second - LWS_PRE, LWS_WRITE_TEXT);
         if (n < len) {
           req->wsi = nullptr;
@@ -191,15 +223,14 @@ int ws_callback(struct lws *wsi, enum lws_callback_reasons reason, void *user, v
       }
       break;
 
+    case LWS_CALLBACK_EVENT_WAIT_CANCELLED:
+      lwsl_user("******* LWS_CALLBACK_EVENT_WAIT_CANCELLED\n");
+      break;
+
     default:
       return lws_callback_http_dummy(wsi, reason, user, in, len);
   }
-
-  if (req->wsi && client.shutdown.load(std::memory_order_relaxed)) {
-    lwsl_user("Shutting down %s:%d%s\n", req->cci.address, req->cci.port, req->cci.path);
-    req->wsi = nullptr;
-    return -1;
-  }
+  
   return lws_callback_http_dummy(wsi, reason, user, in, len);
 }
 

@@ -27,6 +27,10 @@
 #include <libwebsockets.h>
 #include "ring_buffer.h"
 
+#if defined(_MSC_VER)
+#pragma comment(lib, "Ws2_32.lib")
+#endif
+
 #define QUEUE_SIZE 1048576
 
 using namespace slick::net;

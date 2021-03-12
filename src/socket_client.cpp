@@ -43,6 +43,7 @@ socket_client::socket_client(client_callback_t *callback,
 }
 
 socket_client::~socket_client() {
+  stop();
   if (service_ && !service_->is_global()) {
     delete service_;
     service_ = nullptr;
@@ -91,6 +92,7 @@ bool socket_client::send(char *msg, size_t len) {
 
   if (socket_info.sending_buffer.write(msg, len)) {
     lws_callback_on_writable(request_->wsi);
+    service_->wakeup();
     return true;
   }
   return false;
@@ -118,8 +120,9 @@ int raw_socket_callback(struct lws *wsi, enum lws_callback_reasons reason, void 
         lwsl_user("%s", (const char*)in);
       }
       lwsl_user("\n");
+      req->wsi = nullptr;
       client.callback->on_error((const char*)in, len);
-      break;
+      return -1;
 
     case LWS_CALLBACK_RAW_WRITEABLE: {
       auto msg = client.sending_buffer.read();

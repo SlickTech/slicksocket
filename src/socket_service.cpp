@@ -1,7 +1,11 @@
 #include "socket_service.h"
 #include <slicksocket/http_client.h>
 #include "utils.h"
-#include <unordered_set>
+#include <mutex>
+
+#if defined(_MSC_VER)
+#pragma comment(lib, "Ws2_32.lib")
+#endif
 
 #define QUEUE_SIZE 65536
 
@@ -54,7 +58,7 @@ socket_service::socket_service(std::string ca_file_path, int32_t cpu_affinity, b
   lws_context_creation_info context_info;
   memset(&context_info, 0, sizeof(context_info));
 
-  context_info.options = LWS_SERVER_OPTION_DO_SSL_GLOBAL_INIT;
+  context_info.options = LWS_SERVER_OPTION_DO_SSL_GLOBAL_INIT | LWS_SERVER_OPTION_H2_JUST_FIX_WINDOW_UPDATE_OVERFLOW;
   context_info.port = CONTEXT_PORT_NO_LISTEN;
   context_info.protocols = s_protocols;
   context_info.ka_time = 5;
@@ -81,7 +85,6 @@ socket_service* socket_service::global(const std::string& ca_file_path, int32_t 
 }
 
 void socket_service::serve(int32_t cpu_affinity) {
-  std::unordered_set<request_info *> requests;
   uint64_t sn = 0;
   set_cpu_affinity(cpu_affinity);
   while (run_.load(std::memory_order_relaxed)) {
@@ -90,16 +93,20 @@ void socket_service::serve(int32_t cpu_affinity) {
       auto req = request_queue_[cursor_++];
       auto &cci = req->cci;
       cci.context = context_;
-      requests.emplace(req);
-        lwsl_user("Connecting to %s:%d%s\n", cci.address, cci.port, cci.path);
-        lws_client_connect_via_info(&cci);
+      req->service = this;
+      requests_.emplace(req);
+      lwsl_user("Connecting to %s:%d%s\n", cci.address, cci.port, cci.path);
+      lws_client_connect_via_info(&cci);
+    }
+    
+    if (requests_.empty()) {
+      std::this_thread::yield();
+      continue;
     }
 
-    if (!requests.empty()) {
-      lws_service(context_, 0);
-    }
+    lws_service(context_, 0);
 
-    for (auto it = requests.begin(); it != requests.end();) {
+    for (auto it = requests_.begin(); it != requests_.end();) {
       auto req = *it;
       if (!req->wsi) {
         if (req->type == request_type::http) {
@@ -109,22 +116,13 @@ void socket_service::serve(int32_t cpu_affinity) {
             http_info.callback(http_response(http_info.status, http_info.content_type, http_info.response.str()));
             request_pool_.release_obj(req);
           }
-          it = requests.erase(it);
-        } else if (req->type == request_type::ws) {
-          auto& ws_info = req->socket_info;
-          if (ws_info.shutdown.load(std::memory_order_relaxed)) {
+          it = requests_.erase(it);
+        } else if (req->type == request_type::ws || req->type == request_type::socket) {
+          auto& socket_info = req->socket_info;
+          if (socket_info.shutdown.load(std::memory_order_relaxed)) {
             // client shutdown
             request_pool_.release_obj(req);
-            it = requests.erase(it);
-          } else {
-            ++it;
-          }
-        } else if (req->type == request_type::socket) {
-          auto& socket_req = req->socket_info;
-          if (socket_req.shutdown.load(std::memory_order_relaxed)) {
-            // client shutdown
-            request_pool_.release_obj(req);
-            it = requests.erase(it);
+            it = requests_.erase(it);
           } else {
             ++it;
           }
@@ -132,6 +130,14 @@ void socket_service::serve(int32_t cpu_affinity) {
       } else {
         ++it;
       }
+    }
+  }
+}
+
+void socket_service::notify_all() const {
+  for (auto req : requests_) {
+    if (req->wsi) {
+      lws_callback_on_writable(req->wsi);
     }
   }
 }

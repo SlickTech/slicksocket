@@ -26,9 +26,7 @@
 
 #include <thread>
 #include <unordered_map>
-
-//struct lws;
-//enum lws_callback_reasons;
+#include <atomic>
 
 namespace slick {
 namespace net {
