@@ -1,4 +1,7 @@
 cmake_minimum_required(VERSION 3.12)
+
+include(cmake/set_triplet.cmake)
+
 project(slicksocket
         VERSION 1.0.0
         DESCRIPTION "A C++ http(s) and websocket(s) client library based on libwebsockets"
@@ -18,18 +21,11 @@ if (CMAKE_BUILD_TYPE MATCHES Release)
 endif()
 
 find_package(libwebsockets CONFIG REQUIRED)
-find_path(LIBWEBSOCKETS_INCLUDE_DIR libwebsockets.h)
-#find_library(WEBSOCKETS libwebsockets.a)
-#find_library(SSL libssl.a)
-#find_library(CRYPTO libcrypto.a)
-#find_library(LIBUV liblibuv.a)
-#find_library(LIBZ libz.a)
-
-#-DOPENSSL_INCLUDE_DIR=/usr/local/Cellar/openssl@1.1/1.1.1g/include -DOPENSSL_SSL_LIBRARY=/usr/local/Cellar/openssl@1.1/1.1.1g/lib/libssl.dylib -DOPENSSL_CRYPTO_LIBRARY=/usr/local/Cellar/openssl@1.1/1.1.1g/lib/libcrypto.dylib
+Message(STATUS "libwebsockets include: ${LIBWEBSOCKETS_INCLUDE_DIRS}")
 
 option(SLICKSOCKET_WITHOUT_TESTS "Don't build tests" OFF)
 
-include_directories(include ${LIBWEBSOCKETS_INCLUDE_DIR})
+include_directories(include ${LIBWEBSOCKETS_INCLUDE_DIRS})
 
 set(PUBLIC_HEADERS
         include/slicksocket/callback.h
@@ -61,10 +57,10 @@ add_library(slicksocket ${PUBLIC_HEADERS} ${SOURCES})
 #add_dependencies(slicksocket websockets)
 
 # SHARED LIB
-add_library(slicksocket_shared SHARED ${SOURCES})
-#add_dependencies(slicksocket_shared websockets_shared)
-set_target_properties(slicksocket_shared PROPERTIES OUTPUT_NAME "slicksocket")
-target_link_libraries(slicksocket_shared PRIVATE ${SLICKSOCKET_LIBS})
+#add_library(slicksocket_shared SHARED ${SOURCES})
+##add_dependencies(slicksocket_shared websockets_shared)
+#set_target_properties(slicksocket_shared PROPERTIES OUTPUT_NAME "slicksocket")
+#target_link_libraries(slicksocket_shared PRIVATE ${SLICKSOCKET_LIBS})
 
 if (WIN32)
     set(SLICKSOCKET_LIBS ${SLICKSOCKET_LIBS} ws2_32)
@@ -72,7 +68,7 @@ if (WIN32)
 
     set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS ON)
     include(GenerateExportHeader)
-    generate_export_header(slicksocket_shared)
+    #    generate_export_header(slicksocket_shared)
 
 #    add_custom_command(TARGET slicksocket_shared POST_BUILD
 #            COMMAND ${CMAKE_COMMAND} -E copy
@@ -86,15 +82,15 @@ else()
 #            "${CMAKE_BINARY_DIR}/lib/")
 
     if(APPLE)
-        target_compile_options(slicksocket_shared PRIVATE -Wno-implicit-function-declaration -Wno-int-to-pointer-cast
-            -flto -fno-strict-aliasing -fomit-frame-pointer -Wall)
+	    #        target_compile_options(slicksocket_shared PRIVATE -Wno-implicit-function-declaration -Wno-int-to-pointer-cast
+	    #-flto -fno-strict-aliasing -fomit-frame-pointer -Wall)
 
 #        add_custom_command(TARGET slicksocket_shared POST_BUILD
 #                COMMAND ${CMAKE_COMMAND} -E copy
 #                "${libwebsockets_BINARY_DIR}/lib/libwebsockets.dylib"
 #                "${CMAKE_BINARY_DIR}/bin/")
     else()
-        target_compile_options(slicksocket_shared PRIVATE -flto -flto-partition=none -fno-strict-aliasing -fomit-frame-pointer -Wall)
+	    # target_compile_options(slicksocket_shared PRIVATE -flto -flto-partition=none -fno-strict-aliasing -fomit-frame-pointer -Wall)
 
 #        add_custom_command(TARGET slicksocket POST_BUILD
 #                COMMAND ${CMAKE_COMMAND} -E copy

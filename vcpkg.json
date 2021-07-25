@@ -1,0 +1,9 @@
+{
+  "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg/master/scripts/vcpkg.schema.json",
+  "name": "slicksocket",
+  "version-string": "0.0.1",
+  "description": "A lightweight cross-platform modern C++ HTTP/HTTPS and WebSocket client library on top of libwebsockets",
+  "dependencies": [
+    "libwebsockets"
+  ]
+}
