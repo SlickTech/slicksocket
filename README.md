@@ -152,5 +152,4 @@ int main(int argc, char* argv[]) {
 ```
 
 ## Caveats
-* Does not support HTTP/WebSocket server at the moment
 * Need multipart form-data support.
