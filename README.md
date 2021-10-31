@@ -1,5 +1,5 @@
 # SlickSocket
-A lightweight cross-platform modern C++ HTTP/HTTPS and WebSocket library.
+A lightweight cross-platform modern C++ HTTP/HTTPS and WebSocket client library.
 
 ## Why another network library?
 There are few C++ HTTP libraries out there, but most of them are lack of ssl support. Some of 
