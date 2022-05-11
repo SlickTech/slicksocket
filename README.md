@@ -94,7 +94,7 @@ endif()
 Using http_client in your code:<br />
 ```c++
 // sampel.cpp
-#include <slicksocket/http_cliet.h>
+#include <slicksocket/http_client.h>
 #include <iostream>
 
 using namespace slick::net;
@@ -105,7 +105,7 @@ int main(int argc, char* argv[]) {
     // GET request
     
     // Synchronous request
-    auto rsp = client->request("GET", /products");
+    auto rsp = client.request("GET", "/products");
     if (rsp.status != 200) {
         std::cerr << "Failed to get products";
         return 1;
